@@ -138,13 +138,34 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
 
     params.initFlags = XEFG_SWAPCHAIN_INIT_FLAG_NONE;
     if (Config::Instance()->FGXeFGDepthInverted.value_or_default())
+    {
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_INVERTED_DEPTH;
+        LOG_DEBUG("Inverted Depth");
+    }
+    else
+    {
+        LOG_DEBUG("Normal Depth");
+    }
 
     if (Config::Instance()->FGXeFGJitteredMV.value_or_default())
+    {
+        LOG_DEBUG("Jittered Velocity");
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_JITTERED_MV;
+    }
+    else
+    {
+        LOG_DEBUG("Normal Velocity");
+    }
 
     if (Config::Instance()->FGXeFGHighResMV.value_or_default())
+    {
+        LOG_DEBUG("High Res Velocity");
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_HIGH_RES_MV;
+    }
+    else
+    {
+        LOG_DEBUG("Low Res Velocity");
+    }
 
     auto result = XeFGProxy::D3D12InitFromSwapChainDesc()(_swapChainContext, hwnd, &scDesc, &fsDesc, realQueue,
                                                           factory12, &params);
@@ -204,14 +225,35 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
     params.maxInterpolatedFrames = 1;
 
     params.initFlags = XEFG_SWAPCHAIN_INIT_FLAG_NONE;
-    if (_featureFlags & NVSDK_NGX_DLSS_Feature_Flags_DepthInverted || true)
+    if (Config::Instance()->FGXeFGDepthInverted.value_or_default())
+    {
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_INVERTED_DEPTH;
+        LOG_DEBUG("Inverted Depth");
+    }
+    else
+    {
+        LOG_DEBUG("Normal Depth");
+    }
 
-    if (_featureFlags & NVSDK_NGX_DLSS_Feature_Flags_MVJittered)
+    if (Config::Instance()->FGXeFGJitteredMV.value_or_default())
+    {
+        LOG_DEBUG("Jittered Velocity");
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_JITTERED_MV;
+    }
+    else
+    {
+        LOG_DEBUG("Normal Velocity");
+    }
 
-    if ((_featureFlags & NVSDK_NGX_DLSS_Feature_Flags_MVLowRes) == 0)
+    if (Config::Instance()->FGXeFGHighResMV.value_or_default())
+    {
+        LOG_DEBUG("High Res Velocity");
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_HIGH_RES_MV;
+    }
+    else
+    {
+        LOG_DEBUG("Low Res Velocity");
+    }
 
     auto result = XeFGProxy::D3D12InitFromSwapChainDesc()(_swapChainContext, hwnd, desc, pFullscreenDesc, realQueue,
                                                           factory12, &params);
@@ -396,8 +438,11 @@ bool XeFG_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, bool useHudless, do
     if (upscaleFeature != nullptr)
     {
         renderWidth = upscaleFeature->RenderWidth();
-        renderHeight = upscaleFeature->RenderWidth();
+        renderHeight = upscaleFeature->RenderHeight();
     }
+
+    LOG_DEBUG("Render Size: {}x{}", renderWidth, renderHeight);
+    LOG_DEBUG("Output Base: {}:{}, Size: {}x{}", left, top, width, height);
 
     xefg_swapchain_d3d12_resource_data_t backbuffer = {};
     backbuffer.type = XEFG_SWAPCHAIN_RES_BACKBUFFER;
@@ -414,7 +459,19 @@ bool XeFG_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, bool useHudless, do
     xefg_swapchain_d3d12_resource_data_t velocity = {};
     velocity.type = XEFG_SWAPCHAIN_RES_MOTION_VECTOR;
     velocity.validity = XEFG_SWAPCHAIN_RV_UNTIL_NEXT_PRESENT;
-    velocity.resourceSize = { renderWidth, renderHeight };
+
+    if (upscaleFeature != nullptr)
+    {
+        if (upscaleFeature->LowResMV())
+            velocity.resourceSize = { renderWidth, renderHeight };
+        else
+            velocity.resourceSize = { width, height };
+    }
+    else
+    {
+        velocity.resourceSize = { renderWidth, renderHeight };
+    }
+
     velocity.pResource = _paramVelocity[fIndex];
     velocity.incomingState = D3D12_RESOURCE_STATE_COPY_DEST;
 

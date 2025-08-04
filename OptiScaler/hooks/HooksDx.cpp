@@ -895,7 +895,7 @@ static HRESULT hkCreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, DXGI
 
                 if (o_FGSCPresent != nullptr)
                 {
-                    LOG_INFO("Hooking FSR FG SwapChain present");
+                    LOG_INFO("Hooking FG SwapChain present");
 
                     DetourTransactionBegin();
                     DetourUpdateThread(GetCurrentThread());
@@ -1181,7 +1181,7 @@ static HRESULT hkCreateSwapChainForHwnd(IDXGIFactory* This, IUnknown* pDevice, H
 
                 if (o_FGSCPresent != nullptr)
                 {
-                    LOG_INFO("Hooking FSR FG SwapChain present");
+                    LOG_INFO("Hooking FG SwapChain present");
 
                     DetourTransactionBegin();
                     DetourUpdateThread(GetCurrentThread());

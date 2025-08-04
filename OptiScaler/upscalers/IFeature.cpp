@@ -48,6 +48,8 @@ bool IFeature::SetInitParameters(NVSDK_NGX_Parameter* InParameters)
             _initFlags.DepthInverted = _featureFlags & NVSDK_NGX_DLSS_Feature_Flags_DepthInverted;
         }
 
+        Config::Instance()->FGXeFGDepthInverted = _initFlags.DepthInverted;
+
         if (Config::Instance()->JitterCancellation.has_value())
         {
             LOG_INFO("JitteredMV flag overrided by user: {}", Config::Instance()->JitterCancellation.value());
@@ -57,6 +59,8 @@ bool IFeature::SetInitParameters(NVSDK_NGX_Parameter* InParameters)
         {
             _initFlags.JitteredMV = _featureFlags & NVSDK_NGX_DLSS_Feature_Flags_MVJittered;
         }
+
+        Config::Instance()->FGXeFGJitteredMV = _initFlags.JitteredMV;
 
         if (Config::Instance()->DisplayResolution.has_value())
         {
@@ -68,6 +72,8 @@ bool IFeature::SetInitParameters(NVSDK_NGX_Parameter* InParameters)
 
             _initFlags.LowResMV = _featureFlags & NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
         }
+
+        Config::Instance()->FGXeFGHighResMV = !_initFlags.LowResMV;
 
         // First check state to prevent upscaler re-init loops
         if (State::Instance().AutoExposure.has_value())

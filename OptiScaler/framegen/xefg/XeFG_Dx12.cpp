@@ -407,13 +407,18 @@ bool XeFG_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, bool useHudless, do
     DXGI_SWAP_CHAIN_DESC scDesc1 {};
     if (State::Instance().currentSwapchain->GetDesc(&scDesc1) == S_OK)
     {
+        LOG_DEBUG("SwapChain Res: {}x{}, Upscaler Display Res: {}x{}", scDesc1.BufferDesc.Width,
+                  scDesc1.BufferDesc.Height, upscaleFeature->DisplayWidth(), upscaleFeature->DisplayHeight());
+
         if (upscaleFeature != nullptr)
         {
-            auto calculatedLeft = (scDesc1.BufferDesc.Width - upscaleFeature->DisplayWidth()) / 2;
-            left = Config::Instance()->FGRectLeft.value_or(calculatedLeft);
+            auto calculatedLeft = ((int) scDesc1.BufferDesc.Width - (int) upscaleFeature->DisplayWidth()) / 2;
+            if (calculatedLeft > 0)
+                left = Config::Instance()->FGRectLeft.value_or(calculatedLeft);
 
-            auto calculatedTop = (scDesc1.BufferDesc.Height - upscaleFeature->DisplayHeight()) / 2;
-            top = Config::Instance()->FGRectTop.value_or(calculatedTop);
+            auto calculatedTop = ((int) scDesc1.BufferDesc.Height - (int) upscaleFeature->DisplayHeight()) / 2;
+            if (calculatedTop > 0)
+                top = Config::Instance()->FGRectTop.value_or(calculatedTop);
         }
         else
         {
@@ -505,6 +510,8 @@ bool XeFG_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, bool useHudless, do
         hudless.resourceSize = { width, height };
         hudless.pResource = _paramHudless[fIndex];
         hudless.incomingState = D3D12_RESOURCE_STATE_COPY_DEST;
+
+        LOG_DEBUG("Using _paramHudless[{}]: {:X}", fIndex, (size_t) _paramHudless[fIndex]);
 
         result = XeFGProxy::D3D12TagFrameResource()(_swapChainContext, _commandList[fIndex], _frameCount, &hudless);
         if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)

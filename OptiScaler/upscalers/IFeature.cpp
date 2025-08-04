@@ -48,8 +48,6 @@ bool IFeature::SetInitParameters(NVSDK_NGX_Parameter* InParameters)
             _initFlags.DepthInverted = _featureFlags & NVSDK_NGX_DLSS_Feature_Flags_DepthInverted;
         }
 
-        Config::Instance()->FGXeFGDepthInverted = _initFlags.DepthInverted;
-
         if (Config::Instance()->JitterCancellation.has_value())
         {
             LOG_INFO("JitteredMV flag overrided by user: {}", Config::Instance()->JitterCancellation.value());
@@ -59,8 +57,6 @@ bool IFeature::SetInitParameters(NVSDK_NGX_Parameter* InParameters)
         {
             _initFlags.JitteredMV = _featureFlags & NVSDK_NGX_DLSS_Feature_Flags_MVJittered;
         }
-
-        Config::Instance()->FGXeFGJitteredMV = _initFlags.JitteredMV;
 
         if (Config::Instance()->DisplayResolution.has_value())
         {
@@ -72,8 +68,6 @@ bool IFeature::SetInitParameters(NVSDK_NGX_Parameter* InParameters)
 
             _initFlags.LowResMV = _featureFlags & NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
         }
-
-        Config::Instance()->FGXeFGHighResMV = !_initFlags.LowResMV;
 
         // First check state to prevent upscaler re-init loops
         if (State::Instance().AutoExposure.has_value())
@@ -104,6 +98,14 @@ bool IFeature::SetInitParameters(NVSDK_NGX_Parameter* InParameters)
         LOG_INFO("Init Flag JitteredMV: {}", _initFlags.JitteredMV);
         LOG_INFO("Init Flag LowResMV: {}", _initFlags.LowResMV);
         LOG_INFO("Init Flag SharpenEnabled: {}", _initFlags.SharpenEnabled);
+
+        Config::Instance()->FGXeFGDepthInverted = _initFlags.DepthInverted;
+        Config::Instance()->FGXeFGJitteredMV = _initFlags.JitteredMV;
+        Config::Instance()->FGXeFGHighResMV = !_initFlags.LowResMV;
+        LOG_DEBUG("XeFG DepthInverted: {}", Config::Instance()->FGXeFGDepthInverted.value_or_default());
+        LOG_DEBUG("XeFG JitteredMV: {}", Config::Instance()->FGXeFGJitteredMV.value_or_default());
+        LOG_DEBUG("XeFG HighResMV: {}", Config::Instance()->FGXeFGHighResMV.value_or_default());
+        Config::Instance()->SaveXeFG();
     }
 
     if (InParameters->Get(NVSDK_NGX_Parameter_OutWidth, &outWidth) == NVSDK_NGX_Result_Success &&

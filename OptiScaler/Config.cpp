@@ -1058,6 +1058,16 @@ bool Config::SaveIni()
     return ini.SaveFile(absoluteFileName.wstring().c_str()) >= 0;
 }
 
+bool Config::SaveXeFG()
+{
+    ini.SetValue("OptiFG", "XeFGDepthInverted",
+                 GetBoolValue(Instance()->FGXeFGDepthInverted.value_for_config()).c_str());
+    ini.SetValue("OptiFG", "XeFGJitteredMV", GetBoolValue(Instance()->FGXeFGJitteredMV.value_for_config()).c_str());
+    ini.SetValue("OptiFG", "XeFGHighResMV", GetBoolValue(Instance()->FGXeFGHighResMV.value_for_config()).c_str());
+
+    return true;
+}
+
 bool Config::ReloadFakenvapi()
 {
     auto FN_iniPath = Util::DllPath().parent_path() / L"fakenvapi.ini";

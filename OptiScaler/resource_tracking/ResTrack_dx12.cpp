@@ -689,11 +689,18 @@ void ResTrack_Dx12::hkExecuteCommandLists(ID3D12CommandQueue* This, UINT NumComm
     auto fg = State::Instance().currentFG;
     auto index = fg == nullptr ? 0 : fg->GetIndex();
 
-    if (State::Instance().activeFgType == OptiFG && fg != nullptr && fg->NeedsCommandlistExecution() &&
-        (_hudlessCmdList != nullptr || _inputsCmdList != nullptr))
+    if (State::Instance().activeFgType == OptiFG && (_hudlessCmdList != nullptr || _inputsCmdList != nullptr))
     {
         int cmdListCount = 0;
-        int targetListCount = (_inputsCmdList == nullptr ? 0 : 1) + (fg->NoHudless() ? 0 : 1);
+        int targetListCount = 0;
+
+        // Waiting for input command list?
+        if (_inputsCmdList != nullptr)
+            targetListCount++;
+
+        // Waiting for hudless command list?
+        if (!fg->NoHudless() && (_hudlessCmdList != nullptr || _hudlessCommandList[index] != nullptr))
+            targetListCount++;
 
         for (size_t i = 0; i < NumCommandLists; i++)
         {
@@ -712,7 +719,7 @@ void ResTrack_Dx12::hkExecuteCommandLists(ID3D12CommandQueue* This, UINT NumComm
             }
         }
 
-        if (cmdListCount == targetListCount)
+        if (targetListCount > 0 && cmdListCount == targetListCount)
         {
             std::vector<ID3D12CommandList*> ppCmdLists;
 

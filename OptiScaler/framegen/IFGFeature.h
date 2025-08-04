@@ -24,7 +24,13 @@ class IFGFeature
     UINT64 _lastUpscaledFrameId = 0;
 
     bool _isActive = false;
-    UINT64 _targetFrame = 0;
+    bool _waitingStop = false;
+    UINT64 _targetFrame = 999999999999999;
+
+    bool _mvAndDepthReady[BUFFER_COUNT] = { false, false, false, false };
+    bool _hudlessReady[BUFFER_COUNT] = { false, false, false, false };
+    bool _hudlessDispatchReady[BUFFER_COUNT] = { false, false, false, false };
+    bool _noHudless[BUFFER_COUNT] = { true, true, true, true };
 
     IID streamlineRiid {};
 
@@ -47,9 +53,11 @@ class IFGFeature
     virtual bool ReadyForExecute() = 0;
 
     virtual void ReleaseObjects() = 0;
-    virtual void StopAndDestroyContext(bool destroy, bool shutDown, bool useMutex) = 0;
+    virtual void Start() = 0;
+    virtual void DestroyContext() = 0;
 
     UINT64 StartNewFrame();
+    void Stop();
 
     bool IsActive();
     int GetIndex();

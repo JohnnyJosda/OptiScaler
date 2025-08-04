@@ -336,7 +336,7 @@ void Hudfix_Dx12::HudlessFound(ID3D12GraphicsCommandList* cmdList)
     _captureCounter[GetIndex()] = 9999;
 
     auto fg = State::Instance().currentFG;
-    fg->Dispatch(nullptr, true, State::Instance().lastFrameTime);
+    fg->Dispatch();
 
     // Increase counter
     _fgCounter++;
@@ -456,10 +456,6 @@ bool Hudfix_Dx12::IsResourceCheckActive()
         return false;
 
     if (!State::Instance().currentFG->IsActive() || State::Instance().FGchanged)
-        return false;
-
-    auto fg = reinterpret_cast<IFGFeature_Dx12*>(State::Instance().currentFG);
-    if (fg == nullptr)
         return false;
 
     return true;

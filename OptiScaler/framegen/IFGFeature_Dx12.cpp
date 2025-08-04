@@ -252,6 +252,8 @@ void IFGFeature_Dx12::SetHudless(ID3D12GraphicsCommandList* cmdList, ID3D12Resou
     auto index = GetIndex();
     LOG_TRACE("Index: {}, Resource: {:X}, CmdList: {:X}", index, (size_t) hudless, (size_t) cmdList);
 
+    _noHudless[index] = false;
+
     if (cmdList == nullptr || !makeCopy)
     {
         _paramHudless[index] = hudless;
@@ -311,6 +313,8 @@ void IFGFeature_Dx12::CreateObjects(ID3D12Device* InDevice)
         }
 
     } while (false);
+
+    _waitingStop = false;
 }
 
 void IFGFeature_Dx12::ReleaseObjects()

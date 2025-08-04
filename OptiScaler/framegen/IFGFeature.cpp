@@ -7,7 +7,21 @@ int IFGFeature::GetIndex() { return (_frameCount % BUFFER_COUNT); }
 UINT64 IFGFeature::StartNewFrame()
 {
     LOG_FUNC();
-    return ++_frameCount;
+    _frameCount++;
+    auto index = GetIndex();
+
+    _mvAndDepthReady[index] = false;
+    _hudlessReady[index] = false;
+    _hudlessDispatchReady[index] = false;
+    _noHudless[index] = true;
+
+    return _frameCount;
+}
+
+void IFGFeature::Stop()
+{
+    LOG_DEBUG();
+    _waitingStop = true;
 }
 
 bool IFGFeature::CheckForRealObject(std::string functionName, IUnknown* pObject, IUnknown** ppRealObject)
@@ -60,6 +74,9 @@ void IFGFeature::SetReset(UINT reset) { _reset = reset; }
 
 void IFGFeature::ResetCounters()
 {
+    // disabled for now, for testing
+    return;
+
     _frameCount = 0;
     _targetFrame = 0;
 }

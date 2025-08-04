@@ -505,7 +505,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_Shutdown(void)
     // HooksDx::UnHookDx();
 
     if (State::Instance().currentFG != nullptr)
-        State::Instance().currentFG->StopAndDestroyContext(true, true, false);
+        State::Instance().currentFG->DestroyContext();
 
     shutdown = false;
 
@@ -933,7 +933,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_ReleaseFeature(NVSDK_NGX_Handle* 
     State::Instance().FGchanged = true;
     if (State::Instance().currentFG != nullptr)
     {
-        State::Instance().currentFG->StopAndDestroyContext(true, false, false);
+        State::Instance().currentFG->DestroyContext();
         Hudfix_Dx12::ResetCounters();
     }
 
@@ -1276,7 +1276,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
         {
             if (State::Instance().currentFG != nullptr && State::Instance().currentFG->IsActive())
             {
-                State::Instance().currentFG->StopAndDestroyContext(false, false, false);
+                State::Instance().currentFG->DestroyContext();
                 Hudfix_Dx12::ResetCounters();
                 State::Instance().FGchanged = true;
             }
@@ -1488,19 +1488,19 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
     if (State::Instance().activeFgType == OptiFG && Config::Instance()->OverlayMenu.value_or_default())
     {
         if (!State::Instance().FGchanged && Config::Instance()->FGEnabled.value_or_default() &&
-            fg->TargetFrame() < fg->FrameCount() && !fg->IsActive() &&
-            HooksDx::CurrentSwapchainFormat() != DXGI_FORMAT_UNKNOWN)
+            fg->FrameGenerationContext() == nullptr && HooksDx::CurrentSwapchainFormat() != DXGI_FORMAT_UNKNOWN)
         {
             fg->CreateObjects(D3D12Device);
             fg->CreateContext(D3D12Device, deviceContext->feature->GetFeatureFlags(),
                               deviceContext->feature->DisplayWidth(), deviceContext->feature->DisplayHeight());
             fg->ResetCounters();
             fg->UpdateTarget();
+            fg->Start();
         }
         else if ((!Config::Instance()->FGEnabled.value_or_default() || State::Instance().FGchanged) && fg != nullptr &&
                  fg->IsActive())
         {
-            fg->StopAndDestroyContext(State::Instance().SCchanged, false, false);
+            fg->DestroyContext();
             Hudfix_Dx12::ResetCounters();
         }
 
@@ -1593,8 +1593,8 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
         InParameters->Get(NVSDK_NGX_Parameter_Output, (void**) &output);
 
     UINT frameIndex;
-    if (!State::Instance().isShuttingDown && fg != nullptr && fg->IsActive() &&
-        State::Instance().activeFgType == OptiFG && Config::Instance()->OverlayMenu.value_or_default() &&
+    if (!State::Instance().isShuttingDown && fg != nullptr && State::Instance().activeFgType == OptiFG &&
+        fg->IsActive() && Config::Instance()->OverlayMenu.value_or_default() &&
         Config::Instance()->FGEnabled.value_or_default() && fg->TargetFrame() < fg->FrameCount() &&
         State::Instance().currentSwapchain != nullptr)
     {
@@ -1737,7 +1737,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
             else
             {
                 LOG_DEBUG("(FG) running, frame: {0}", deviceContext->feature->FrameCount());
-                fg->Dispatch(InCmdList, false, State::Instance().lastFrameTime);
+                fg->Dispatch();
             }
         }
 

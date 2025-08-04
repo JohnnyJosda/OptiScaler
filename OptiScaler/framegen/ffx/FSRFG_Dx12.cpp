@@ -59,23 +59,44 @@ feature_version FSRFG_Dx12::Version()
 
 const char* FSRFG_Dx12::Name() { return "FSR-FG"; }
 
-bool FSRFG_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, bool useHudless, double frameTime)
+bool FSRFG_Dx12::Dispatch()
 {
     _lastDispatchedFrame = _frameCount;
 
-    LOG_DEBUG("useHudless: {}, frameTime: {}", useHudless, frameTime);
+    if (_fgContext != nullptr && _waitingStop)
+    {
+        _waitingStop = false;
+
+        if (_isActive)
+        {
+            ffxConfigureDescFrameGeneration m_FrameGenerationConfig = {};
+            m_FrameGenerationConfig.header.type = FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION;
+            m_FrameGenerationConfig.frameGenerationEnabled = false;
+            m_FrameGenerationConfig.swapChain = State::Instance().currentSwapchain;
+            m_FrameGenerationConfig.presentCallback = nullptr;
+            m_FrameGenerationConfig.HUDLessColor = FfxApiResource({});
+
+            ffxReturnCode_t result;
+            result = FfxApiProxy::D3D12_Configure()(&_fgContext, &m_FrameGenerationConfig.header);
+
+            _isActive = false;
+
+            if (State::Instance().isShuttingDown)
+                LOG_INFO("D3D12_Configure result: {0:X}", result);
+        }
+
+        return true;
+    }
 
     if (State::Instance().FSRFGFTPchanged)
         ConfigureFramePaceTuning();
 
     auto fIndex = GetIndex();
 
-    _noHudless[fIndex] = !useHudless;
-
     ffxConfigureDescFrameGeneration m_FrameGenerationConfig = {};
     m_FrameGenerationConfig.header.type = FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION;
 
-    if (useHudless && _paramHudless[fIndex] != nullptr)
+    if (!_noHudless[fIndex] && _paramHudless[fIndex] != nullptr)
     {
         LOG_TRACE("Using hudless: {:X}", (size_t) _paramHudless[fIndex]);
         m_FrameGenerationConfig.HUDLessColor =
@@ -148,7 +169,7 @@ bool FSRFG_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, bool useHudless, d
         if (pUserCtx != nullptr)
             fsrFG = reinterpret_cast<FSRFG_Dx12*>(pUserCtx);
 
-        if (fsrFG != nullptr)
+        if (fsrFG != nullptr && !State::Instance().isShuttingDown)
             return fsrFG->DispatchCallback(params);
 
         return FFX_API_RETURN_ERROR;
@@ -276,14 +297,37 @@ void* FSRFG_Dx12::SwapchainContext()
     return _swapChainContext;
 }
 
-void FSRFG_Dx12::StopAndDestroyContext(bool destroy, bool shutDown, bool useMutex)
+void FSRFG_Dx12::Start()
+{
+    LOG_DEBUG();
+    if (_fgContext != nullptr && !_isActive)
+    {
+        ffxConfigureDescFrameGeneration m_FrameGenerationConfig = {};
+        m_FrameGenerationConfig.header.type = FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION;
+        m_FrameGenerationConfig.frameGenerationEnabled = true;
+        m_FrameGenerationConfig.swapChain = State::Instance().currentSwapchain;
+        m_FrameGenerationConfig.presentCallback = nullptr;
+        m_FrameGenerationConfig.HUDLessColor = FfxApiResource({});
+
+        ffxReturnCode_t result;
+        result = FfxApiProxy::D3D12_Configure()(&_fgContext, &m_FrameGenerationConfig.header);
+
+        _isActive = true;
+
+        if (State::Instance().isShuttingDown)
+            LOG_INFO("D3D12_Configure result: {0:X}", result);
+    }
+}
+
+void FSRFG_Dx12::DestroyContext()
 {
     _frameCount = 0;
+    _isActive = false;
 
     LOG_DEBUG("");
 
     bool mutexTaken = false;
-    if (Config::Instance()->FGUseMutexForSwapchain.value_or_default() && useMutex)
+    if (Config::Instance()->FGUseMutexForSwapchain.value_or_default())
     {
         LOG_TRACE("Waiting Mutex 1, current: {}", Mutex.getOwner());
         Mutex.lock(1);
@@ -291,7 +335,7 @@ void FSRFG_Dx12::StopAndDestroyContext(bool destroy, bool shutDown, bool useMute
         LOG_TRACE("Accuired Mutex: {}", Mutex.getOwner());
     }
 
-    if (!(shutDown || State::Instance().isShuttingDown) && _fgContext != nullptr)
+    if (_fgContext != nullptr)
     {
         ffxConfigureDescFrameGeneration m_FrameGenerationConfig = {};
         m_FrameGenerationConfig.header.type = FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION;
@@ -300,27 +344,17 @@ void FSRFG_Dx12::StopAndDestroyContext(bool destroy, bool shutDown, bool useMute
         m_FrameGenerationConfig.presentCallback = nullptr;
         m_FrameGenerationConfig.HUDLessColor = FfxApiResource({});
 
-        ffxReturnCode_t result;
-        result = FfxApiProxy::D3D12_Configure()(&_fgContext, &m_FrameGenerationConfig.header);
+        auto result = FfxApiProxy::D3D12_Configure()(&_fgContext, &m_FrameGenerationConfig.header);
 
-        _isActive = false;
+        result = FfxApiProxy::D3D12_DestroyContext()(&_fgContext, nullptr);
 
-        if (!(shutDown || State::Instance().isShuttingDown))
-            LOG_INFO("D3D12_Configure result: {0:X}", result);
-    }
-
-    if (destroy && _fgContext != nullptr)
-    {
-        auto result = FfxApiProxy::D3D12_DestroyContext()(&_fgContext, nullptr);
-
-        if (!(shutDown || State::Instance().isShuttingDown))
+        if (!State::Instance().isShuttingDown)
             LOG_INFO("D3D12_DestroyContext result: {0:X}", result);
 
         _fgContext = nullptr;
     }
 
-    if (shutDown || State::Instance().isShuttingDown)
-        ReleaseObjects();
+    ReleaseObjects();
 
     if (mutexTaken)
     {
@@ -419,7 +453,7 @@ bool FSRFG_Dx12::ReleaseSwapchain(HWND hwnd)
     MenuOverlayDx::CleanupRenderTarget(true, NULL);
 
     if (_fgContext != nullptr)
-        StopAndDestroyContext(true, true, false);
+        DestroyContext();
 
     if (_swapChainContext != nullptr)
     {

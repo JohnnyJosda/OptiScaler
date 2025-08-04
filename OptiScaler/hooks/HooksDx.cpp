@@ -225,7 +225,7 @@ static HRESULT hkFGPresent(void* This, UINT SyncInterval, UINT Flags)
 
     if (willPresent)
     {
-        if (State::Instance().activeFgType == OptiFG && HooksDx::dx12UpscaleTrig &&
+        if (State::Instance().activeFgType == OptiFG && fg != nullptr && fg->IsActive() && HooksDx::dx12UpscaleTrig &&
             HooksDx::readbackBuffer != nullptr && HooksDx::queryHeap != nullptr &&
             State::Instance().currentCommandQueue != nullptr)
         {
@@ -285,15 +285,15 @@ static HRESULT hkFGPresent(void* This, UINT SyncInterval, UINT Flags)
     }
 
     if (willPresent && State::Instance().currentCommandQueue != nullptr && State::Instance().activeFgType == OptiFG &&
-        fg->IsActive() && fg->TargetFrame() < fg->FrameCount() && fg->LastDispatchedFrame() != fg->FrameCount() &&
-        fg->UpscalerInputsReady())
+        fg != nullptr && fg->IsActive() && fg->TargetFrame() < fg->FrameCount() &&
+        fg->LastDispatchedFrame() != fg->FrameCount() && fg->UpscalerInputsReady())
     {
         State::Instance().fgTrigSource = "Present";
         fg->Present();
 
         LOG_DEBUG("Dispatch hudless fg");
 
-        if (fg->Dispatch(nullptr, false, State::Instance().lastFrameTime))
+        if (fg->Dispatch())
         {
             auto cmdList = fg->GetCommandList();
             State::Instance().currentCommandQueue->ExecuteCommandLists(1, &cmdList);
@@ -859,6 +859,7 @@ static HRESULT hkCreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, DXGI
         // FG Init
         if (State::Instance().currentFG == nullptr)
             State::Instance().currentFG = new XeFG_Dx12();
+
         // State::Instance().currentFG = new FSRFG_Dx12();
 
         HooksDx::ReleaseDx12SwapChain(pDesc->OutputWindow);

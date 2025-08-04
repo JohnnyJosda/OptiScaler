@@ -26,6 +26,62 @@ void XeFG_Dx12::xefgLogCallback(const char* message, xefg_swapchain_logging_leve
     }
 }
 
+bool XeFG_Dx12::CreateSwapchainContext(ID3D12Device* device)
+{
+    if (XeFGProxy::Module() == nullptr && !XeFGProxy::InitXeFG())
+    {
+        LOG_ERROR("XeFG proxy can't find libxess_fg.dll!");
+        return false;
+    }
+
+    State::Instance().skipSpoofing = true;
+    auto result = XeFGProxy::D3D12CreateContext()(device, &_swapChainContext);
+    State::Instance().skipSpoofing = false;
+
+    if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+    {
+        LOG_ERROR("D3D12CreateContext error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        return false;
+    }
+
+    LOG_INFO("XeFG context created");
+    result = XeFGProxy::SetLoggingCallback()(_swapChainContext, XEFG_SWAPCHAIN_LOGGING_LEVEL_DEBUG, xefgLogCallback,
+                                             nullptr);
+
+    if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+    {
+        LOG_ERROR("SetLoggingCallback error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+    }
+
+    if (XeLLProxy::Context() == nullptr)
+        XeLLProxy::CreateContext(device);
+
+    if (XeLLProxy::Context() != nullptr)
+    {
+        xell_sleep_params_t sleepParams = {};
+        sleepParams.bLowLatencyMode = true;
+        sleepParams.bLowLatencyBoost = false;
+        sleepParams.minimumIntervalUs = 0;
+
+        auto xellResult = XeLLProxy::SetSleepMode()(XeLLProxy::Context(), &sleepParams);
+        if (xellResult != XELL_RESULT_SUCCESS)
+        {
+            LOG_ERROR("SetSleepMode error: {} ({})", magic_enum::enum_name(xellResult), (UINT) xellResult);
+            return false;
+        }
+
+        result = XeFGProxy::SetLatencyReduction()(_swapChainContext, XeLLProxy::Context());
+
+        if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+        {
+            LOG_ERROR("SetLatencyReduction error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+            return false;
+        }
+    };
+
+    return true;
+}
+
 const char* XeFG_Dx12::Name() { return "XeFG"; }
 
 feature_version XeFG_Dx12::Version()
@@ -39,48 +95,48 @@ feature_version XeFG_Dx12::Version()
     return { 0, 0, 0 };
 }
 
-void XeFG_Dx12::StopAndDestroyContext(bool destroy, bool shutDown, bool useMutex)
+void XeFG_Dx12::Start()
+{
+    if (_swapChainContext != nullptr && !_isActive)
+    {
+        auto result = XeFGProxy::SetEnabled()(_swapChainContext, true);
+
+        _isActive = true;
+
+        LOG_INFO("SetEnabled result: {} ({})", magic_enum::enum_name(result), (UINT) result);
+    }
+}
+
+void XeFG_Dx12::DestroyContext()
 {
     LOG_DEBUG("");
 
-    bool mutexTaken = false;
-    if (Config::Instance()->FGUseMutexForSwapchain.value_or_default() && useMutex)
+    if (_fgContext != nullptr)
     {
-        LOG_TRACE("Waiting Mutex 1, current: {}", Mutex.getOwner());
-        Mutex.lock(1);
-        mutexTaken = true;
-        LOG_TRACE("Accuired Mutex: {}", Mutex.getOwner());
-    }
-
-    if (!(shutDown || State::Instance().isShuttingDown) && _swapChainContext != nullptr)
-    {
-        auto result = XeFGProxy::SetEnabled()(_swapChainContext, false);
-
         _isActive = false;
-
-        if (!(shutDown || State::Instance().isShuttingDown))
-            LOG_INFO("SetEnabled result: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        _fgContext = nullptr;
+        auto result = XeFGProxy::SetEnabled()(_swapChainContext, false);
+        LOG_INFO("SetEnabled result: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        ReleaseObjects();
     }
+}
 
-    if (destroy && _swapChainContext != nullptr)
+bool XeFG_Dx12::DestroySwapchainContext()
+{
+    LOG_DEBUG("");
+
+    _frameCount = 0;
+    _isActive = false;
+
+    if (_swapChainContext != nullptr)
     {
-        if (!(shutDown || State::Instance().isShuttingDown))
-        {
-            auto result = XeFGProxy::Destroy()(_swapChainContext);
-            LOG_INFO("Destroy result: {} ({})", magic_enum::enum_name(result), (UINT) result);
-        }
+        auto result = XeFGProxy::Destroy()(_swapChainContext);
+        LOG_INFO("Destroy result: {} ({})", magic_enum::enum_name(result), (UINT) result);
 
         _swapChainContext = nullptr;
     }
 
-    if (shutDown || State::Instance().isShuttingDown)
-        ReleaseObjects();
-
-    if (mutexTaken)
-    {
-        LOG_TRACE("Releasing Mutex: {}", Mutex.getOwner());
-        Mutex.unlockThis(1);
-    }
+    return true;
 }
 
 bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQueue, DXGI_SWAP_CHAIN_DESC* desc,
@@ -91,10 +147,13 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
         if (State::Instance().currentD3D12Device == nullptr)
             return false;
 
-        CreateContext(State::Instance().currentD3D12Device, 0, desc->BufferDesc.Width, desc->BufferDesc.Height);
+        CreateSwapchainContext(State::Instance().currentD3D12Device);
 
         if (_swapChainContext == nullptr)
             return false;
+
+        _width = desc->BufferDesc.Width;
+        _height = desc->BufferDesc.Height;
     }
 
     IDXGIFactory* realFactory = nullptr;
@@ -200,10 +259,13 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
         if (State::Instance().currentD3D12Device == nullptr)
             return false;
 
-        CreateContext(State::Instance().currentD3D12Device, 0, desc->Width, desc->Height);
+        CreateSwapchainContext(State::Instance().currentD3D12Device);
 
         if (_swapChainContext == nullptr)
             return false;
+
+        _width = desc->Width;
+        _height = desc->Height;
     }
 
     IDXGIFactory* realFactory = nullptr;
@@ -296,7 +358,7 @@ bool XeFG_Dx12::ReleaseSwapchain(HWND hwnd)
     MenuOverlayDx::CleanupRenderTarget(true, NULL);
 
     if (_swapChainContext != nullptr)
-        StopAndDestroyContext(true, true, false);
+        DestroySwapchainContext();
 
     if (Config::Instance()->FGUseMutexForSwapchain.value_or_default())
     {
@@ -309,85 +371,38 @@ bool XeFG_Dx12::ReleaseSwapchain(HWND hwnd)
 
 void XeFG_Dx12::CreateContext(ID3D12Device* device, int featureFlags, uint32_t width, uint32_t height)
 {
-    if (_swapChainContext != nullptr)
+    if (_fgContext == nullptr)
     {
-        auto result = XeFGProxy::SetEnabled()(_swapChainContext, true);
-
-        if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
-        {
-            LOG_ERROR("SetEnabled error: {} ({})", magic_enum::enum_name(result), (UINT) result);
-            return;
-        }
-
-        _isActive = true;
-        return;
-    }
-
-    if (XeFGProxy::Module() == nullptr && !XeFGProxy::InitXeFG())
-    {
-        LOG_ERROR("XeFG proxy can't find libxess_fg.dll!");
-        return;
-    }
-
-    _featureFlags = featureFlags;
-    _width = width;
-    _height = height;
-
-    State::Instance().skipSpoofing = true;
-    auto result = XeFGProxy::D3D12CreateContext()(device, &_swapChainContext);
-    State::Instance().skipSpoofing = false;
-
-    if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
-    {
-        LOG_ERROR("D3D12CreateContext error: {} ({})", magic_enum::enum_name(result), (UINT) result);
-        return;
-    }
-
-    LOG_INFO("XeFG context created");
-    result = XeFGProxy::SetLoggingCallback()(_swapChainContext, XEFG_SWAPCHAIN_LOGGING_LEVEL_DEBUG, xefgLogCallback,
-                                             nullptr);
-
-    if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
-    {
-        LOG_ERROR("SetLoggingCallback error: {} ({})", magic_enum::enum_name(result), (UINT) result);
-    }
-
-    if (XeLLProxy::Context() == nullptr)
-        XeLLProxy::CreateContext(device);
-
-    if (XeLLProxy::Context() != nullptr)
-    {
-        xell_sleep_params_t sleepParams = {};
-        sleepParams.bLowLatencyMode = true;
-        sleepParams.bLowLatencyBoost = false;
-        sleepParams.minimumIntervalUs = 0;
-
-        auto xellResult = XeLLProxy::SetSleepMode()(XeLLProxy::Context(), &sleepParams);
-        if (xellResult != XELL_RESULT_SUCCESS)
-        {
-            LOG_ERROR("SetSleepMode error: {} ({})", magic_enum::enum_name(xellResult), (UINT) xellResult);
-            return;
-        }
-
-        result = XeFGProxy::SetLatencyReduction()(_swapChainContext, XeLLProxy::Context());
-
-        if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
-        {
-            LOG_ERROR("SetLatencyReduction error: {} ({})", magic_enum::enum_name(result), (UINT) result);
-            return;
-        }
+        _featureFlags = featureFlags;
+        _width = width;
+        _height = height;
+        _fgContext = _swapChainContext;
     }
 }
 
-bool XeFG_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, bool useHudless, double frameTime)
+bool XeFG_Dx12::Dispatch()
 {
     LOG_DEBUG();
 
     _lastDispatchedFrame = _frameCount;
 
-    auto fIndex = GetIndex();
+    if (_swapChainContext != nullptr && _waitingStop)
+    {
+        _waitingStop = false;
 
-    _noHudless[fIndex] = !useHudless;
+        if (_isActive)
+        {
+            auto result = XeFGProxy::SetEnabled()(_swapChainContext, false);
+
+            _isActive = false;
+
+            LOG_INFO("SetEnabled result: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        }
+
+        return true;
+    }
+
+    auto fIndex = GetIndex();
 
     XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_SHOW_ONLY_INTERPOLATION,
                                     State::Instance().FGonlyGenerated, nullptr);
@@ -501,7 +516,7 @@ bool XeFG_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, bool useHudless, do
         return false;
     }
 
-    if (useHudless)
+    if (!_noHudless[fIndex])
     {
         xefg_swapchain_d3d12_resource_data_t hudless = {};
         hudless.type = XEFG_SWAPCHAIN_RES_HUDLESS_COLOR;
@@ -539,7 +554,7 @@ bool XeFG_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, bool useHudless, do
     constData.motionVectorScaleX = _mvScaleX;
     constData.motionVectorScaleY = _mvScaleY;
     constData.resetHistory = _reset;
-    constData.frameRenderTime = frameTime;
+    constData.frameRenderTime = _ftDelta;
 
     result = XeFGProxy::TagFrameConstants()(_swapChainContext, _frameCount, &constData);
     if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
@@ -563,6 +578,6 @@ bool XeFG_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, bool useHudless, do
     return true;
 }
 
-void* XeFG_Dx12::FrameGenerationContext() { return _swapChainContext; }
+void* XeFG_Dx12::FrameGenerationContext() { return _fgContext; }
 
 void* XeFG_Dx12::SwapchainContext() { return _swapChainContext; }

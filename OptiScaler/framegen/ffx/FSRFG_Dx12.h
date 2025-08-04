@@ -18,7 +18,8 @@ class FSRFG_Dx12 : public virtual IFGFeature_Dx12
     const char* Name() override final;
     feature_version Version() override final;
 
-    void StopAndDestroyContext(bool destroy, bool shutDown, bool useMutex) override final;
+    void Start() override final;
+    void DestroyContext() override final;
 
     // IFGFeature_Dx12
     bool CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQueue, DXGI_SWAP_CHAIN_DESC* desc,
@@ -29,7 +30,7 @@ class FSRFG_Dx12 : public virtual IFGFeature_Dx12
 
     void CreateContext(ID3D12Device* device, int featureFlags, uint32_t width, uint32_t height) override final;
 
-    bool Dispatch(ID3D12GraphicsCommandList* cmdList, bool useHudless, double frameTime) override final;
+    bool Dispatch() override final;
 
     void* FrameGenerationContext() override final;
     void* SwapchainContext() override final;

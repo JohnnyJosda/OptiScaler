@@ -21,11 +21,6 @@ class IFGFeature_Dx12 : public virtual IFGFeature
     ID3D12CommandQueue* _gameCommandQueue = nullptr;
     HWND _hwnd = NULL;
 
-    bool _mvAndDepthReady[BUFFER_COUNT] = { false, false, false, false };
-    bool _hudlessReady[BUFFER_COUNT] = { false, false, false, false };
-    bool _hudlessDispatchReady[BUFFER_COUNT] = { false, false, false, false };
-    bool _noHudless[BUFFER_COUNT] = { false, false, false, false };
-
     ID3D12Resource* _paramVelocity[BUFFER_COUNT] = { nullptr, nullptr, nullptr, nullptr };
     ID3D12Resource* _paramVelocityCopy[BUFFER_COUNT] = { nullptr, nullptr, nullptr, nullptr };
     ID3D12Resource* _paramDepth[BUFFER_COUNT] = { nullptr, nullptr, nullptr, nullptr };
@@ -55,7 +50,7 @@ class IFGFeature_Dx12 : public virtual IFGFeature
 
     virtual void CreateContext(ID3D12Device* device, int featureFlags, uint32_t width, uint32_t height) = 0;
 
-    virtual bool Dispatch(ID3D12GraphicsCommandList* cmdList, bool useHudless, double frameTime) = 0;
+    virtual bool Dispatch() = 0;
 
     virtual void* FrameGenerationContext() = 0;
     virtual void* SwapchainContext() = 0;

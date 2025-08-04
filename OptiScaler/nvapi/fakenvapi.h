@@ -16,6 +16,7 @@ class fakenvapi
     inline static decltype(&Fake_InformPresentFG) Fake_InformPresentFG = nullptr;
     inline static decltype(&Fake_GetAntiLagCtx) Fake_GetAntiLagCtx = nullptr;
     inline static decltype(&Fake_GetLowLatencyCtx) Fake_GetLowLatencyCtx = nullptr;
+    inline static decltype(&Fake_SetLowLatencyCtx) Fake_SetLowLatencyCtx = nullptr;
 
     inline static bool _inited = false;
     static void* _lowLatencyContext;
@@ -29,6 +30,7 @@ class fakenvapi
     static void Init(PFN_NvApi_QueryInterface& queryInterface);
     static void reportFGPresent(IDXGISwapChain* pSwapChain, bool fg_state, bool frame_interpolated);
     static bool updateModeAndContext();
+    static bool setModeAndContext(void* context, Mode mode);
     static Mode getCurrentMode();
     static bool isUsingFakenvapi();
 };

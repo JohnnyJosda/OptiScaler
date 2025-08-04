@@ -70,6 +70,9 @@ bool XeFG_Dx12::CreateSwapchainContext(ID3D12Device* device)
             return false;
         }
 
+        auto fnaResult = fakenvapi::setModeAndContext(XeLLProxy::Context(), Mode::XeLL);
+        LOG_DEBUG("fakenvapi::setModeAndContext: {}", fnaResult);
+
         result = XeFGProxy::SetLatencyReduction()(_swapChainContext, XeLLProxy::Context());
 
         if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)

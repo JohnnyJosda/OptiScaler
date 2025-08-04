@@ -15,6 +15,7 @@ void fakenvapi::Init(PFN_NvApi_QueryInterface& queryInterface)
     Fake_InformPresentFG = static_cast<decltype(Fake_InformPresentFG)>(queryInterface(GET_ID(Fake_InformPresentFG)));
     Fake_GetAntiLagCtx = static_cast<decltype(Fake_GetAntiLagCtx)>(queryInterface(GET_ID(Fake_GetAntiLagCtx)));
     Fake_GetLowLatencyCtx = static_cast<decltype(Fake_GetLowLatencyCtx)>(queryInterface(GET_ID(Fake_GetLowLatencyCtx)));
+    Fake_SetLowLatencyCtx = static_cast<decltype(Fake_SetLowLatencyCtx)>(queryInterface(GET_ID(Fake_SetLowLatencyCtx)));
 
     if (Fake_InformFGState == nullptr)
         LOG_INFO("Couldn't get InformFGState");
@@ -27,6 +28,9 @@ void fakenvapi::Init(PFN_NvApi_QueryInterface& queryInterface)
 
     if (Fake_GetLowLatencyCtx == nullptr)
         LOG_INFO("Couldn't get GetLowLatencyCtx");
+
+    if (Fake_SetLowLatencyCtx == nullptr)
+        LOG_INFO("Couldn't get SetLowLatencyCtx");
 
     _inited = true;
 }
@@ -103,6 +107,26 @@ bool fakenvapi::updateModeAndContext()
 
     _lowLatencyContext = nullptr;
     _lowLatencyMode = Mode::LatencyFlex;
+
+    return false;
+}
+
+bool fakenvapi::setModeAndContext(void* context, Mode mode)
+{
+    if (!isUsingFakenvapi())
+        return false;
+
+    LOG_FUNC();
+
+    if (Fake_SetLowLatencyCtx)
+    {
+        auto result = Fake_SetLowLatencyCtx(context, mode);
+
+        if (result != NVAPI_OK)
+            LOG_ERROR("Can't set Low Latency context from fakenvapi");
+
+        return result == NVAPI_OK;
+    }
 
     return false;
 }

@@ -11,6 +11,8 @@
 #include <xefg_swapchain_d3d12.h>
 #include <xefg_swapchain_debug.h>
 
+#include <nvapi/fakenvapi.h>
+
 class XeFG_Dx12 : public virtual IFGFeature_Dx12
 {
   private:

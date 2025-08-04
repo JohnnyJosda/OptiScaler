@@ -1052,9 +1052,7 @@ bool Config::SaveIni()
     }
 
     auto pathWStr = absoluteFileName.wstring();
-
     LOG_INFO("Trying to save ini to: {0}", wstring_to_string(pathWStr));
-
     return ini.SaveFile(absoluteFileName.wstring().c_str()) >= 0;
 }
 
@@ -1065,7 +1063,10 @@ bool Config::SaveXeFG()
     ini.SetValue("OptiFG", "XeFGJitteredMV", GetBoolValue(Instance()->FGXeFGJitteredMV.value_for_config()).c_str());
     ini.SetValue("OptiFG", "XeFGHighResMV", GetBoolValue(Instance()->FGXeFGHighResMV.value_for_config()).c_str());
 
-    return true;
+    auto pathWStr = absoluteFileName.wstring();
+    LOG_INFO("Trying to save ini to: {0}", wstring_to_string(pathWStr));
+
+    return ini.SaveFile(absoluteFileName.wstring().c_str()) >= 0;
 }
 
 bool Config::ReloadFakenvapi()

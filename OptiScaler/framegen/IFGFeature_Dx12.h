@@ -54,6 +54,7 @@ class IFGFeature_Dx12 : public virtual IFGFeature
 
     virtual void* FrameGenerationContext() = 0;
     virtual void* SwapchainContext() = 0;
+    virtual bool NeedsCommandlistExecution() = 0;
 
     // IFGFeature
     void ReleaseObjects() override final;

@@ -47,6 +47,7 @@ class XeFG_Dx12 : public virtual IFGFeature_Dx12
 
     void* FrameGenerationContext() override final;
     void* SwapchainContext() override final;
+    bool NeedsCommandlistExecution() override final { return false; }
 
     XeFG_Dx12() : IFGFeature_Dx12(), IFGFeature()
     {

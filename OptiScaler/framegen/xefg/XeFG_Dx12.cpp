@@ -404,12 +404,13 @@ bool XeFG_Dx12::Dispatch()
 
     auto fIndex = GetIndex();
 
+    XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_TAG_INTERPOLATED_FRAMES,
+                                    Config::Instance()->FGDebugView.value_or_default(), nullptr);
+
     XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_SHOW_ONLY_INTERPOLATION,
                                     State::Instance().FGonlyGenerated, nullptr);
     XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_PRESENT_FAILED_INTERPOLATION,
-                                    Config::Instance()->FGDebugResetLines.value_or_default(), nullptr);
-    XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_TAG_INTERPOLATED_FRAMES,
-                                    Config::Instance()->FGDebugView.value_or_default(), nullptr);
+                                    State::Instance().FGonlyGenerated, nullptr);
 
     uint32_t left = 0;
     uint32_t top = 0;
@@ -555,6 +556,8 @@ bool XeFG_Dx12::Dispatch()
     constData.motionVectorScaleY = _mvScaleY;
     constData.resetHistory = _reset;
     constData.frameRenderTime = _ftDelta;
+
+    LOG_DEBUG("Reset: {}, FTDelta: {}", _reset, _ftDelta);
 
     result = XeFGProxy::TagFrameConstants()(_swapChainContext, _frameCount, &constData);
     if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)

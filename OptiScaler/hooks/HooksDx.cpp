@@ -295,8 +295,11 @@ static HRESULT hkFGPresent(void* This, UINT SyncInterval, UINT Flags)
 
         if (fg->Dispatch())
         {
-            auto cmdList = fg->GetCommandList();
-            State::Instance().currentCommandQueue->ExecuteCommandLists(1, &cmdList);
+            if (fg->NeedsCommandlistExecution())
+            {
+                auto cmdList = fg->GetCommandList();
+                State::Instance().currentCommandQueue->ExecuteCommandLists(1, &cmdList);
+            }
         }
     }
 

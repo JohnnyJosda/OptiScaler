@@ -2,16 +2,25 @@
 
 #include <framegen/IFGFeature_Dx12.h>
 
-#include <proxies/FfxApi_Proxy.h>
+#include <proxies/XeLL_Proxy.h>
+#include <proxies/XeFG_Proxy.h>
 
-#include <dx12/ffx_api_dx12.h>
-#include <ffx_framegeneration.h>
+#include <xell.h>
+#include <xell_d3d12.h>
+#include <xefg_swapchain.h>
+#include <xefg_swapchain_d3d12.h>
+#include <xefg_swapchain_debug.h>
 
-class FSRFG_Dx12 : public virtual IFGFeature_Dx12
+class XeFG_Dx12 : public virtual IFGFeature_Dx12
 {
   private:
-    ffxContext _swapChainContext = nullptr;
-    ffxContext _fgContext = nullptr;
+    xefg_swapchain_handle_t _swapChainContext = nullptr;
+
+    uint32_t _width = 0;
+    uint32_t _height = 0;
+    int _featureFlags = 0;
+
+    static void xefgLogCallback(const char* message, xefg_swapchain_logging_level_t level, void* userData);
 
   public:
     // IFGFeature
@@ -34,13 +43,9 @@ class FSRFG_Dx12 : public virtual IFGFeature_Dx12
     void* FrameGenerationContext() override final;
     void* SwapchainContext() override final;
 
-    // Methods
-    void ConfigureFramePaceTuning();
-
-    ffxReturnCode_t DispatchCallback(ffxDispatchDescFrameGeneration* params);
-
-    FSRFG_Dx12() : IFGFeature_Dx12(), IFGFeature()
+    XeFG_Dx12() : IFGFeature_Dx12(), IFGFeature()
     {
-        //
+        if (XeFGProxy::Module() == nullptr)
+            XeFGProxy::InitXeFG();
     }
 };

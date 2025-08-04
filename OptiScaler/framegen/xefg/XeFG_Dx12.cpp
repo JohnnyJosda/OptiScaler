@@ -1,0 +1,504 @@
+#include "XeFG_Dx12.h"
+
+#include <menu/menu_overlay_dx.h>
+
+#include <magic_enum.hpp>
+
+void XeFG_Dx12::xefgLogCallback(const char* message, xefg_swapchain_logging_level_t level, void* userData)
+{
+    switch (level)
+    {
+    case XEFG_SWAPCHAIN_LOGGING_LEVEL_DEBUG:
+        spdlog::debug("XeFG Log: {}", message);
+        return;
+
+    case XEFG_SWAPCHAIN_LOGGING_LEVEL_INFO:
+        spdlog::info("XeFG Log: {}", message);
+        return;
+
+    case XEFG_SWAPCHAIN_LOGGING_LEVEL_WARNING:
+        spdlog::warn("XeFG Log: {}", message);
+        return;
+
+    default:
+        spdlog::error("XeFG Log: {}", message);
+        return;
+    }
+}
+
+const char* XeFG_Dx12::Name() { return "XeFG"; }
+
+feature_version XeFG_Dx12::Version()
+{
+    if (XeFGProxy::InitXeFG())
+    {
+        auto ver = XeFGProxy::Version();
+        return ver;
+    }
+
+    return { 0, 0, 0 };
+}
+
+void XeFG_Dx12::StopAndDestroyContext(bool destroy, bool shutDown, bool useMutex)
+{
+    LOG_DEBUG("");
+
+    bool mutexTaken = false;
+    if (Config::Instance()->FGUseMutexForSwapchain.value_or_default() && useMutex)
+    {
+        LOG_TRACE("Waiting Mutex 1, current: {}", Mutex.getOwner());
+        Mutex.lock(1);
+        mutexTaken = true;
+        LOG_TRACE("Accuired Mutex: {}", Mutex.getOwner());
+    }
+
+    if (!(shutDown || State::Instance().isShuttingDown) && _swapChainContext != nullptr)
+    {
+        auto result = XeFGProxy::SetEnabled()(_swapChainContext, false);
+
+        _isActive = false;
+
+        if (!(shutDown || State::Instance().isShuttingDown))
+            LOG_INFO("SetEnabled result: {} ({})", magic_enum::enum_name(result), (UINT) result);
+    }
+
+    if (destroy && _swapChainContext != nullptr)
+    {
+        if (!(shutDown || State::Instance().isShuttingDown))
+        {
+            auto result = XeFGProxy::Destroy()(_swapChainContext);
+            LOG_INFO("Destroy result: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        }
+
+        _swapChainContext = nullptr;
+    }
+
+    if (shutDown || State::Instance().isShuttingDown)
+        ReleaseObjects();
+
+    if (mutexTaken)
+    {
+        LOG_TRACE("Releasing Mutex: {}", Mutex.getOwner());
+        Mutex.unlockThis(1);
+    }
+}
+
+bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQueue, DXGI_SWAP_CHAIN_DESC* desc,
+                                IDXGISwapChain** swapChain)
+{
+    if (_swapChainContext == nullptr)
+    {
+        if (State::Instance().currentD3D12Device == nullptr)
+            return false;
+
+        CreateContext(State::Instance().currentD3D12Device, 0, desc->BufferDesc.Width, desc->BufferDesc.Height);
+
+        if (_swapChainContext == nullptr)
+            return false;
+    }
+
+    IDXGIFactory* realFactory = nullptr;
+    ID3D12CommandQueue* realQueue = nullptr;
+
+    if (!CheckForRealObject(__FUNCTION__, factory, (IUnknown**) &realFactory))
+        realFactory = factory;
+
+    if (!CheckForRealObject(__FUNCTION__, cmdQueue, (IUnknown**) &realQueue))
+        realQueue = cmdQueue;
+
+    IDXGIFactory2* factory12 = nullptr;
+    if (realFactory->QueryInterface(IID_PPV_ARGS(&factory12)) != S_OK)
+        return false;
+
+    factory12->Release();
+
+    HWND hwnd = desc->OutputWindow;
+    DXGI_SWAP_CHAIN_DESC1 scDesc {};
+
+    scDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED; // No info
+    scDesc.BufferCount = desc->BufferCount;
+    scDesc.BufferUsage = desc->BufferUsage;
+    scDesc.Flags = desc->Flags;
+    scDesc.Format = desc->BufferDesc.Format;
+    scDesc.Height = desc->BufferDesc.Height;
+    scDesc.SampleDesc = desc->SampleDesc;
+    scDesc.Scaling = DXGI_SCALING_NONE; // No info
+    scDesc.Stereo = false;              // No info
+    scDesc.SwapEffect = desc->SwapEffect;
+    scDesc.Width = desc->BufferDesc.Width;
+
+    DXGI_SWAP_CHAIN_FULLSCREEN_DESC fsDesc {};
+    fsDesc.RefreshRate = desc->BufferDesc.RefreshRate;
+    fsDesc.Scaling = desc->BufferDesc.Scaling;
+    fsDesc.ScanlineOrdering = desc->BufferDesc.ScanlineOrdering;
+    fsDesc.Windowed = desc->Windowed;
+
+    xefg_swapchain_d3d12_init_params_t params {};
+    params.maxInterpolatedFrames = 1;
+
+    params.initFlags = XEFG_SWAPCHAIN_INIT_FLAG_NONE;
+    if (Config::Instance()->FGXeFGDepthInverted.value_or_default())
+        params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_INVERTED_DEPTH;
+
+    if (Config::Instance()->FGXeFGJitteredMV.value_or_default())
+        params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_JITTERED_MV;
+
+    if (Config::Instance()->FGXeFGHighResMV.value_or_default())
+        params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_HIGH_RES_MV;
+
+    auto result = XeFGProxy::D3D12InitFromSwapChainDesc()(_swapChainContext, hwnd, &scDesc, &fsDesc, realQueue,
+                                                          factory12, &params);
+
+    if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+    {
+        LOG_ERROR("D3D12InitFromSwapChainDesc error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        return false;
+    }
+
+    LOG_INFO("XeFG swapchain created");
+    result = XeFGProxy::D3D12GetSwapChainPtr()(_swapChainContext, IID_PPV_ARGS(swapChain));
+    if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+    {
+        LOG_ERROR("D3D12GetSwapChainPtr error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        return false;
+    }
+
+    _gameCommandQueue = realQueue;
+    _swapChain = *swapChain;
+    _hwnd = hwnd;
+
+    return true;
+}
+
+bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQueue, HWND hwnd,
+                                 DXGI_SWAP_CHAIN_DESC1* desc, DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pFullscreenDesc,
+                                 IDXGISwapChain1** swapChain)
+{
+    if (_swapChainContext == nullptr)
+    {
+        if (State::Instance().currentD3D12Device == nullptr)
+            return false;
+
+        CreateContext(State::Instance().currentD3D12Device, 0, desc->Width, desc->Height);
+
+        if (_swapChainContext == nullptr)
+            return false;
+    }
+
+    IDXGIFactory* realFactory = nullptr;
+    ID3D12CommandQueue* realQueue = nullptr;
+
+    if (!CheckForRealObject(__FUNCTION__, factory, (IUnknown**) &realFactory))
+        realFactory = factory;
+
+    if (!CheckForRealObject(__FUNCTION__, cmdQueue, (IUnknown**) &realQueue))
+        realQueue = cmdQueue;
+
+    IDXGIFactory2* factory12 = nullptr;
+    if (realFactory->QueryInterface(IID_PPV_ARGS(&factory12)) != S_OK)
+        return false;
+
+    factory12->Release();
+
+    xefg_swapchain_d3d12_init_params_t params {};
+    params.maxInterpolatedFrames = 1;
+
+    params.initFlags = XEFG_SWAPCHAIN_INIT_FLAG_NONE;
+    if (_featureFlags & NVSDK_NGX_DLSS_Feature_Flags_DepthInverted || true)
+        params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_INVERTED_DEPTH;
+
+    if (_featureFlags & NVSDK_NGX_DLSS_Feature_Flags_MVJittered)
+        params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_JITTERED_MV;
+
+    if ((_featureFlags & NVSDK_NGX_DLSS_Feature_Flags_MVLowRes) == 0)
+        params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_HIGH_RES_MV;
+
+    auto result = XeFGProxy::D3D12InitFromSwapChainDesc()(_swapChainContext, hwnd, desc, pFullscreenDesc, realQueue,
+                                                          factory12, &params);
+
+    if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+    {
+        LOG_ERROR("D3D12InitFromSwapChainDesc error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        return false;
+    }
+
+    LOG_INFO("XeFG swapchain created");
+    result = XeFGProxy::D3D12GetSwapChainPtr()(_swapChainContext, IID_PPV_ARGS(swapChain));
+    if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+    {
+        LOG_ERROR("D3D12GetSwapChainPtr error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        return false;
+    }
+
+    _gameCommandQueue = realQueue;
+    _swapChain = *swapChain;
+    _hwnd = hwnd;
+
+    return true;
+}
+
+bool XeFG_Dx12::ReleaseSwapchain(HWND hwnd)
+{
+    if (hwnd != _hwnd || _hwnd == NULL)
+        return false;
+
+    LOG_DEBUG("");
+
+    if (Config::Instance()->FGUseMutexForSwapchain.value_or_default())
+    {
+        LOG_TRACE("Waiting Mutex 1, current: {}", Mutex.getOwner());
+        Mutex.lock(1);
+        LOG_TRACE("Accuired Mutex: {}", Mutex.getOwner());
+    }
+
+    MenuOverlayDx::CleanupRenderTarget(true, NULL);
+
+    if (_swapChainContext != nullptr)
+        StopAndDestroyContext(true, true, false);
+
+    if (Config::Instance()->FGUseMutexForSwapchain.value_or_default())
+    {
+        LOG_TRACE("Releasing Mutex: {}", Mutex.getOwner());
+        Mutex.unlockThis(1);
+    }
+
+    return true;
+}
+
+void XeFG_Dx12::CreateContext(ID3D12Device* device, int featureFlags, uint32_t width, uint32_t height)
+{
+    if (_swapChainContext != nullptr)
+    {
+        auto result = XeFGProxy::SetEnabled()(_swapChainContext, true);
+
+        if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+        {
+            LOG_ERROR("SetEnabled error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+            return;
+        }
+
+        _isActive = true;
+        return;
+    }
+
+    if (XeFGProxy::Module() == nullptr && !XeFGProxy::InitXeFG())
+    {
+        LOG_ERROR("XeFG proxy can't find libxess_fg.dll!");
+        return;
+    }
+
+    _featureFlags = featureFlags;
+    _width = width;
+    _height = height;
+
+    State::Instance().skipSpoofing = true;
+    auto result = XeFGProxy::D3D12CreateContext()(device, &_swapChainContext);
+    State::Instance().skipSpoofing = false;
+
+    if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+    {
+        LOG_ERROR("D3D12CreateContext error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        return;
+    }
+
+    LOG_INFO("XeFG context created");
+    result = XeFGProxy::SetLoggingCallback()(_swapChainContext, XEFG_SWAPCHAIN_LOGGING_LEVEL_DEBUG, xefgLogCallback,
+                                             nullptr);
+
+    if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+    {
+        LOG_ERROR("SetLoggingCallback error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+    }
+
+    if (XeLLProxy::Context() == nullptr)
+        XeLLProxy::CreateContext(device);
+
+    if (XeLLProxy::Context() != nullptr)
+    {
+        xell_sleep_params_t sleepParams = {};
+        sleepParams.bLowLatencyMode = true;
+        sleepParams.bLowLatencyBoost = false;
+        sleepParams.minimumIntervalUs = 0;
+
+        auto xellResult = XeLLProxy::SetSleepMode()(XeLLProxy::Context(), &sleepParams);
+        if (xellResult != XELL_RESULT_SUCCESS)
+        {
+            LOG_ERROR("SetSleepMode error: {} ({})", magic_enum::enum_name(xellResult), (UINT) xellResult);
+            return;
+        }
+
+        result = XeFGProxy::SetLatencyReduction()(_swapChainContext, XeLLProxy::Context());
+
+        if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+        {
+            LOG_ERROR("SetLatencyReduction error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+            return;
+        }
+    }
+}
+
+bool XeFG_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, bool useHudless, double frameTime)
+{
+    LOG_DEBUG();
+
+    _lastDispatchedFrame = _frameCount;
+
+    auto fIndex = GetIndex();
+
+    _noHudless[fIndex] = !useHudless;
+
+    XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_SHOW_ONLY_INTERPOLATION,
+                                    State::Instance().FGonlyGenerated, nullptr);
+    XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_PRESENT_FAILED_INTERPOLATION,
+                                    Config::Instance()->FGDebugResetLines.value_or_default(), nullptr);
+    XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_TAG_INTERPOLATED_FRAMES,
+                                    Config::Instance()->FGDebugView.value_or_default(), nullptr);
+
+    uint32_t left = 0;
+    uint32_t top = 0;
+    uint32_t width = _width;
+    uint32_t height = _height;
+
+    IFeature* upscaleFeature = State::Instance().currentFeature;
+
+    // use swapchain buffer info
+    DXGI_SWAP_CHAIN_DESC scDesc1 {};
+    if (State::Instance().currentSwapchain->GetDesc(&scDesc1) == S_OK)
+    {
+        if (upscaleFeature != nullptr)
+        {
+            auto calculatedLeft = (scDesc1.BufferDesc.Width - upscaleFeature->DisplayWidth()) / 2;
+            left = Config::Instance()->FGRectLeft.value_or(calculatedLeft);
+
+            auto calculatedTop = (scDesc1.BufferDesc.Height - upscaleFeature->DisplayHeight()) / 2;
+            top = Config::Instance()->FGRectTop.value_or(calculatedTop);
+        }
+        else
+        {
+            left = Config::Instance()->FGRectLeft.value_or(0);
+            top = Config::Instance()->FGRectTop.value_or(0);
+        }
+
+        width = Config::Instance()->FGRectWidth.value_or(_width);
+        height = Config::Instance()->FGRectHeight.value_or(_height);
+    }
+    else
+    {
+        left = Config::Instance()->FGRectLeft.value_or(0);
+        top = Config::Instance()->FGRectTop.value_or(0);
+        width = Config::Instance()->FGRectWidth.value_or(_width);
+        height = Config::Instance()->FGRectHeight.value_or(_height);
+    }
+
+    uint32_t renderWidth = width;
+    uint32_t renderHeight = height;
+
+    if (upscaleFeature != nullptr)
+    {
+        renderWidth = upscaleFeature->RenderWidth();
+        renderHeight = upscaleFeature->RenderWidth();
+    }
+
+    xefg_swapchain_d3d12_resource_data_t backbuffer = {};
+    backbuffer.type = XEFG_SWAPCHAIN_RES_BACKBUFFER;
+    backbuffer.resourceBase = { left, top };
+    backbuffer.resourceSize = { width, height };
+
+    auto result = XeFGProxy::D3D12TagFrameResource()(_swapChainContext, _commandList[fIndex], _frameCount, &backbuffer);
+    if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+    {
+        LOG_ERROR("D3D12TagFrameResource Backbuffer error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        return false;
+    }
+
+    xefg_swapchain_d3d12_resource_data_t velocity = {};
+    velocity.type = XEFG_SWAPCHAIN_RES_MOTION_VECTOR;
+    velocity.validity = XEFG_SWAPCHAIN_RV_UNTIL_NEXT_PRESENT;
+    velocity.resourceSize = { renderWidth, renderHeight };
+    velocity.pResource = _paramVelocity[fIndex];
+    velocity.incomingState = D3D12_RESOURCE_STATE_COPY_DEST;
+
+    result = XeFGProxy::D3D12TagFrameResource()(_swapChainContext, _commandList[fIndex], _frameCount, &velocity);
+    if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+    {
+        LOG_ERROR("D3D12TagFrameResource Velocity error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        return false;
+    }
+
+    xefg_swapchain_d3d12_resource_data_t depth = {};
+    depth.type = XEFG_SWAPCHAIN_RES_DEPTH;
+    depth.validity = XEFG_SWAPCHAIN_RV_UNTIL_NEXT_PRESENT;
+    depth.resourceSize = { renderWidth, renderHeight };
+    depth.pResource = _paramDepth[fIndex];
+    depth.incomingState = D3D12_RESOURCE_STATE_COPY_DEST;
+
+    result = XeFGProxy::D3D12TagFrameResource()(_swapChainContext, _commandList[fIndex], _frameCount, &depth);
+    if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+    {
+        LOG_ERROR("D3D12TagFrameResource Depth error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        return false;
+    }
+
+    if (useHudless)
+    {
+        xefg_swapchain_d3d12_resource_data_t hudless = {};
+        hudless.type = XEFG_SWAPCHAIN_RES_HUDLESS_COLOR;
+        hudless.validity = XEFG_SWAPCHAIN_RV_UNTIL_NEXT_PRESENT;
+        hudless.resourceBase = { left, top };
+        hudless.resourceSize = { width, height };
+        hudless.pResource = _paramHudless[fIndex];
+        hudless.incomingState = D3D12_RESOURCE_STATE_COPY_DEST;
+
+        result = XeFGProxy::D3D12TagFrameResource()(_swapChainContext, _commandList[fIndex], _frameCount, &hudless);
+        if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+        {
+            LOG_ERROR("D3D12TagFrameResource Hudless error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+            return false;
+        }
+    }
+
+    xefg_swapchain_frame_constant_data_t constData = {};
+
+    // float fx = m_constantBufferData.offset.x;
+    // float fy = m_constantBufferData.offset.y;
+
+    // XMFLOAT4X4 float4x4;
+
+    // XMStoreFloat4x4(&float4x4, DirectX::XMMatrixTranslation(fx, fy, 0));
+    // memcpy(constData.viewMatrix, float4x4.m, sizeof(float) * 16);
+
+    // XMStoreFloat4x4(&float4x4, DirectX::XMMatrixIdentity());
+    // memcpy(constData.projectionMatrix, float4x4.m, sizeof(float) * 16);
+
+    constData.jitterOffsetX = _jitterX;
+    constData.jitterOffsetY = _jitterY;
+    constData.motionVectorScaleX = _mvScaleX;
+    constData.motionVectorScaleY = _mvScaleY;
+    constData.resetHistory = _reset;
+    constData.frameRenderTime = frameTime;
+
+    result = XeFGProxy::TagFrameConstants()(_swapChainContext, _frameCount, &constData);
+    if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+    {
+        LOG_ERROR("TagFrameConstants error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        return false;
+    }
+
+    result = XeFGProxy::SetPresentId()(_swapChainContext, _frameCount);
+    if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+    {
+        LOG_ERROR("SetPresentId error: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        return false;
+    }
+
+    _mvAndDepthReady[fIndex] = false;
+    _hudlessReady[fIndex] = false;
+
+    LOG_DEBUG("Result: Ok");
+
+    return true;
+}
+
+void* XeFG_Dx12::FrameGenerationContext() { return _swapChainContext; }
+
+void* XeFG_Dx12::SwapchainContext() { return _swapChainContext; }

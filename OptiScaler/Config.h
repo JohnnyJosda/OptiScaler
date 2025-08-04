@@ -371,7 +371,10 @@ class Config
     CustomOptional<bool> FGHudfixFullSync { false };
     CustomOptional<bool> FGDontUseSwapchainBuffers { false };
     CustomOptional<bool> FGRelaxedResolutionCheck { false };
-    // CustomOptional<bool> FGExecuteAfterCallback { false };
+
+    CustomOptional<bool> FGXeFGDepthInverted { false };
+    CustomOptional<bool> FGXeFGJitteredMV { false };
+    CustomOptional<bool> FGXeFGHighResMV { false };
 
     // OptiFG - Resource Tracking
     CustomOptional<bool> FGAlwaysTrackHeaps { false };

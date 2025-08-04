@@ -103,6 +103,10 @@ bool Config::Reload(std::filesystem::path iniPath)
             FGHudfixFullSync.set_from_config(readBool("OptiFG", "HUDFixFullSync"));
             FGDontUseSwapchainBuffers.set_from_config(readBool("OptiFG", "HUDFixDontUseSwapchainBuffers"));
             FGRelaxedResolutionCheck.set_from_config(readBool("OptiFG", "HUDFixRelaxedResolutionCheck"));
+
+            FGXeFGDepthInverted.set_from_config(readBool("OptiFG", "XeFGDepthInverted"));
+            FGXeFGJitteredMV.set_from_config(readBool("OptiFG", "XeFGJitteredMV"));
+            FGXeFGHighResMV.set_from_config(readBool("OptiFG", "XeFGHighResMV"));
         }
 
         // Framerate
@@ -692,6 +696,11 @@ bool Config::SaveIni()
                      GetBoolValue(Instance()->FGDontUseSwapchainBuffers.value_for_config()).c_str());
         ini.SetValue("OptiFG", "HUDFixRelaxedResolutionCheck",
                      GetBoolValue(Instance()->FGRelaxedResolutionCheck.value_for_config()).c_str());
+
+        ini.SetValue("OptiFG", "XeFGDepthInverted",
+                     GetBoolValue(Instance()->FGXeFGDepthInverted.value_for_config()).c_str());
+        ini.SetValue("OptiFG", "XeFGJitteredMV", GetBoolValue(Instance()->FGXeFGJitteredMV.value_for_config()).c_str());
+        ini.SetValue("OptiFG", "XeFGHighResMV", GetBoolValue(Instance()->FGXeFGHighResMV.value_for_config()).c_str());
     }
 
     // Framerate

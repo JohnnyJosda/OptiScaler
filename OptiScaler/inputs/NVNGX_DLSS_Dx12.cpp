@@ -28,6 +28,7 @@
 #include "detours/detours.h"
 #include <ffx_framegeneration.h>
 #include <ankerl/unordered_dense.h>
+#include <proxies/XeLL_Proxy.h>
 
 // Use a dedicated Queue + CommandList for FG without hudfix
 // Looks like causing stutter/sync issues
@@ -1487,7 +1488,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
     if (State::Instance().activeFgType == OptiFG && Config::Instance()->OverlayMenu.value_or_default())
     {
         if (!State::Instance().FGchanged && Config::Instance()->FGEnabled.value_or_default() &&
-            fg->TargetFrame() < fg->FrameCount() && FfxApiProxy::InitFfxDx12() && !fg->IsActive() &&
+            fg->TargetFrame() < fg->FrameCount() && !fg->IsActive() &&
             HooksDx::CurrentSwapchainFormat() != DXGI_FORMAT_UNKNOWN)
         {
             fg->CreateObjects(D3D12Device);
@@ -1736,7 +1737,6 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
             else
             {
                 LOG_DEBUG("(FG) running, frame: {0}", deviceContext->feature->FrameCount());
-
                 fg->Dispatch(InCmdList, false, State::Instance().lastFrameTime);
             }
         }

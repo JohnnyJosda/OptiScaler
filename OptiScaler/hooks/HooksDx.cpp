@@ -8,6 +8,7 @@
 #include <hudfix/Hudfix_Dx12.h>
 #include <menu/menu_overlay_dx.h>
 #include <framegen/ffx/FSRFG_Dx12.h>
+#include <framegen/xefg/XeFG_Dx12.h>
 #include <resource_tracking/ResTrack_Dx12.h>
 
 #include <proxies/Dxgi_Proxy.h>
@@ -857,7 +858,8 @@ static HRESULT hkCreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, DXGI
 
         // FG Init
         if (State::Instance().currentFG == nullptr)
-            State::Instance().currentFG = new FSRFG_Dx12();
+            State::Instance().currentFG = new XeFG_Dx12();
+        // State::Instance().currentFG = new FSRFG_Dx12();
 
         HooksDx::ReleaseDx12SwapChain(pDesc->OutputWindow);
 
@@ -1141,7 +1143,9 @@ static HRESULT hkCreateSwapChainForHwnd(IDXGIFactory* This, IUnknown* pDevice, H
 
         // FG Init
         if (State::Instance().currentFG == nullptr)
-            State::Instance().currentFG = new FSRFG_Dx12();
+            State::Instance().currentFG = new XeFG_Dx12();
+
+        // State::Instance().currentFG = new FSRFG_Dx12();
 
         HooksDx::ReleaseDx12SwapChain(hWnd);
 

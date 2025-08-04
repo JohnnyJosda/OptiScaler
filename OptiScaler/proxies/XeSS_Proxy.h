@@ -496,11 +496,11 @@ class XeSSProxy
             // if (moduleHandle != nullptr)
             //{
             //    auto path = DllPath(moduleHandle);
-            //    _xessVersion = GetDLLVersion(path.wstring());
+            //    _xellVersion = GetDLLVersion(path.wstring());
             //}
 
-            // if (_xessVersion.major == 0)
-            //     _xessGetVersion(&_xessVersion);
+            // if (_xellVersion.major == 0)
+            //     _xessGetVersion(&_xellVersion);
 
             DetourTransactionBegin();
             DetourUpdateThread(GetCurrentThread());

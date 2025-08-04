@@ -46,16 +46,6 @@ void FSRFG_Dx12::ConfigureFramePaceTuning()
     }
 }
 
-void FSRFG_Dx12::GetDispatchCommandList()
-{
-    ffxQueryDescFrameGenerationSwapChainInterpolationCommandListDX12 queryDesc { 0 };
-    queryDesc.header.type = FFX_API_QUERY_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_INTERPOLATIONCOMMANDLIST_DX12;
-    queryDesc.pOutCommandList = (void**) &_dispatchCommandList;
-
-    auto result = FfxApiProxy::D3D12_Query()(&_swapChainContext, &queryDesc.header);
-    LOG_DEBUG("FG CommandList D3D12_Query result: {}", FfxApiProxy::ReturnCodeToString(result));
-}
-
 feature_version FSRFG_Dx12::Version()
 {
     if (FfxApiProxy::InitFfxDx12())
@@ -493,7 +483,6 @@ void FSRFG_Dx12::CreateContext(ID3D12Device* device, int featureFlags, uint32_t 
     }
 
     createFg.flags = 0;
-
     if (featureFlags & NVSDK_NGX_DLSS_Feature_Flags_IsHDR)
         createFg.flags |= FFX_FRAMEGENERATION_ENABLE_HIGH_DYNAMIC_RANGE;
 

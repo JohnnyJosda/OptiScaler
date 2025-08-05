@@ -200,34 +200,17 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
 
     params.initFlags = XEFG_SWAPCHAIN_INIT_FLAG_NONE;
     if (Config::Instance()->FGXeFGDepthInverted.value_or_default())
-    {
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_INVERTED_DEPTH;
-        LOG_DEBUG("Inverted Depth");
-    }
-    else
-    {
-        LOG_DEBUG("Normal Depth");
-    }
 
     if (Config::Instance()->FGXeFGJitteredMV.value_or_default())
-    {
-        LOG_DEBUG("Jittered Velocity");
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_JITTERED_MV;
-    }
-    else
-    {
-        LOG_DEBUG("Normal Velocity");
-    }
 
     if (Config::Instance()->FGXeFGHighResMV.value_or_default())
-    {
-        LOG_DEBUG("High Res Velocity");
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_HIGH_RES_MV;
-    }
-    else
-    {
-        LOG_DEBUG("Low Res Velocity");
-    }
+
+    LOG_DEBUG("Inverted Depth: {}", Config::Instance()->FGXeFGDepthInverted.value_or_default());
+    LOG_DEBUG("Jittered Velocity: {}", Config::Instance()->FGXeFGJitteredMV.value_or_default());
+    LOG_DEBUG("High Res MV: {}", Config::Instance()->FGXeFGHighResMV.value_or_default());
 
     auto result = XeFGProxy::D3D12InitFromSwapChainDesc()(_swapChainContext, hwnd, &scDesc, &fsDesc, realQueue,
                                                           factory12, &params);
@@ -291,34 +274,17 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
 
     params.initFlags = XEFG_SWAPCHAIN_INIT_FLAG_NONE;
     if (Config::Instance()->FGXeFGDepthInverted.value_or_default())
-    {
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_INVERTED_DEPTH;
-        LOG_DEBUG("Inverted Depth");
-    }
-    else
-    {
-        LOG_DEBUG("Normal Depth");
-    }
 
     if (Config::Instance()->FGXeFGJitteredMV.value_or_default())
-    {
-        LOG_DEBUG("Jittered Velocity");
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_JITTERED_MV;
-    }
-    else
-    {
-        LOG_DEBUG("Normal Velocity");
-    }
 
     if (Config::Instance()->FGXeFGHighResMV.value_or_default())
-    {
-        LOG_DEBUG("High Res Velocity");
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_HIGH_RES_MV;
-    }
-    else
-    {
-        LOG_DEBUG("Low Res Velocity");
-    }
+
+    LOG_DEBUG("Inverted Depth: {}", Config::Instance()->FGXeFGDepthInverted.value_or_default());
+    LOG_DEBUG("Jittered Velocity: {}", Config::Instance()->FGXeFGJitteredMV.value_or_default());
+    LOG_DEBUG("High Res MV: {}", Config::Instance()->FGXeFGHighResMV.value_or_default());
 
     auto result = XeFGProxy::D3D12InitFromSwapChainDesc()(_swapChainContext, hwnd, desc, pFullscreenDesc, realQueue,
                                                           factory12, &params);

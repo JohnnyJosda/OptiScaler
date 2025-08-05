@@ -968,7 +968,7 @@ static HRESULT hkCreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, DXGI
 
             State::Instance().currentSwapchain = (*ppSwapChain);
 
-            LOG_DEBUG("Created FSR-FG swapchain");
+            LOG_DEBUG("Created FG swapchain");
             return S_OK;
         }
 
@@ -1254,7 +1254,7 @@ static HRESULT hkCreateSwapChainForHwnd(IDXGIFactory* This, IUnknown* pDevice, H
 
             State::Instance().currentSwapchain = (*ppSwapChain);
 
-            LOG_DEBUG("Created FSR-FG swapchain");
+            LOG_DEBUG("Created FG swapchain");
             return S_OK;
         }
 

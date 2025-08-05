@@ -293,6 +293,8 @@ static HRESULT hkFGPresent(void* This, UINT SyncInterval, UINT Flags)
 
         LOG_DEBUG("Dispatch hudless fg");
 
+        fg->SetFrameTimeDelta(State::Instance().lastFrameTime);
+
         if (fg->Dispatch())
         {
             if (fg->NeedsCommandlistExecution())

@@ -689,7 +689,8 @@ void ResTrack_Dx12::hkExecuteCommandLists(ID3D12CommandQueue* This, UINT NumComm
     auto fg = State::Instance().currentFG;
     auto index = fg == nullptr ? 0 : fg->GetIndex();
 
-    if (State::Instance().activeFgType == OptiFG && (_hudlessCmdList != nullptr || _inputsCmdList != nullptr))
+    if (State::Instance().activeFgType == OptiFG && fg != nullptr && fg->NeedsCommandlistExecution() &&
+        (_hudlessCmdList != nullptr || _inputsCmdList != nullptr))
     {
         int cmdListCount = 0;
         int targetListCount = 0;

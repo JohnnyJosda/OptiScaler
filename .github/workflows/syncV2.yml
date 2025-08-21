@@ -1,0 +1,67 @@
+# 工作流程的名称
+name: Merge Upstream Changes
+
+# 触发工作流程的事件
+on:
+  # 允许手动从 Actions 选项卡运行此工作流程
+  workflow_dispatch:
+
+  # 使用 cron 语法安排工作流程运行
+  schedule:
+    # 每 30 分钟运行一次
+    - cron: '*/60 * * * *'
+
+# 定义一个或多个 "job"
+jobs:
+  # job 的唯一标识符
+  merge:
+    # 指定 job 运行的虚拟机环境
+    runs-on: ubuntu-latest
+
+    # job 包含一系列按顺序执行的步骤
+    steps:
+      # 步骤 1: 签出你的仓库代码到运行器上
+      # 必须提供 token，这样后续的 git push 步骤才有权限
+      - name: Checkout Fork
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # 获取所有历史记录，以便正确执行合并操作
+          fetch-depth: 0
+
+      # 步骤 2: 运行自定义脚本来合并上游更新
+      - name: Merge from Upstream
+        run: |
+          # 如果命令失败则立即退出
+          set -e
+
+          # 配置 git 用户信息，这是创建“合并提交”(merge commit)所必需的
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+          # 定义要同步的上游仓库地址和分支名
+          UPSTREAM_REPO="https://github.com/optiscaler/OptiScaler.git"
+          UPSTREAM_BRANCH="v0.8" # 上游仓库的源分支
+          TARGET_BRANCH="v0.8"   # 你自己仓库的目标分支
+
+          echo "Adding upstream remote..."
+          git remote add upstream "$UPSTREAM_REPO"
+
+          echo "Fetching from upstream..."
+          git fetch upstream
+
+          echo "Switching to branch ${TARGET_BRANCH}..."
+          git checkout "$TARGET_BRANCH"
+
+          echo "Merging changes from upstream/${UPSTREAM_BRANCH}..."
+          # --- 这是核心操作 ---
+          # 尝试将上游分支的更改合并到当前分支
+          git merge "upstream/$UPSTREAM_BRANCH"
+
+          echo "Pushing changes to origin/${TARGET_BRANCH}..."
+          # --- 这是第二个核心操作 ---
+          # 将合并后的结果（包含你的修改和上游的修改）推送到你的 GitHub 仓库
+          # 这里不再需要 --force，因为我们是正常地添加合并提交，而不是重写历史
+          git push origin "$TARGET_BRANCH"
+
+          echo "Merge complete."

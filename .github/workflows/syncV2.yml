@@ -9,7 +9,7 @@ on:
   # 使用 cron 语法安排工作流程运行
   schedule:
     # 每 30 分钟运行一次
-    - cron: '*/60 * * * *'
+    - cron: '* 1 * * *'
 
 # 定义一个或多个 "job"
 jobs:
@@ -41,8 +41,8 @@ jobs:
 
           # 定义要同步的上游仓库地址和分支名
           UPSTREAM_REPO="https://github.com/optiscaler/OptiScaler.git"
-          UPSTREAM_BRANCH="v0.8" # 上游仓库的源分支
-          TARGET_BRANCH="v0.8"   # 你自己仓库的目标分支
+          UPSTREAM_BRANCH="v0.9" # 上游仓库的源分支
+          TARGET_BRANCH="v0.9"   # 你自己仓库的目标分支
 
           echo "Adding upstream remote..."
           git remote add upstream "$UPSTREAM_REPO"

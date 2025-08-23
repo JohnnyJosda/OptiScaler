@@ -68,6 +68,7 @@ class State
     bool NvngxVkInited = false;
 
     flag_set<GameQuirk> gameQuirks;
+    bool isOptiPatcherSucceed = false;
 
     // Reseting on creation of new feature
     std::optional<bool> AutoExposure;
@@ -94,6 +95,7 @@ class State
     bool FGHudlessCompare = false;
     bool FGchanged = false;
     bool SCchanged = false;
+    bool SCExclusiveFullscreen = false;
     bool skipHeapCapture = false;
 
     bool FGcaptureResources = false;
@@ -163,6 +165,7 @@ class State
     bool isRunningOnLinux = false;
     bool isRunningOnDXVK = false;
     bool isRunningOnNvidia = false;
+    bool isPascalOrOlder = false;
     bool isDxgiMode = false;
     bool isD3D12Mode = false;
     bool isWorkingAsNvngx = false;

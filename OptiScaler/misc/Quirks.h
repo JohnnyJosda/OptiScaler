@@ -12,6 +12,7 @@ enum class GameQuirk : uint64_t
     DisableFSR2Inputs,
     DisableFFXInputs,
     RestoreComputeSigOnNonNvidia,
+    RestoreComputeSigOnNvidia,
     ForceAutoExposure,
     DisableReactiveMasks,
     DisableDxgiSpoofing,
@@ -32,6 +33,7 @@ enum class GameQuirk : uint64_t
     VulkanDLSSBarrierFixup,
     ForceUnrealEngine,
     NoFSRFGFirstSwapchain,
+    FixSlSimulationMarkers,
     // Don't forget to add the new entry to printQuirks
     _
 };
@@ -65,8 +67,9 @@ static const QuirkEntry quirkTable[] = {
     // Crapcom Games, DLSS without dxgi spoofing needs restore compute in those
     QUIRK_ENTRY("kunitsugami.exe", GameQuirk::RestoreComputeSigOnNonNvidia, GameQuirk::DisableDxgiSpoofing),
     QUIRK_ENTRY("kunitsugamidemo.exe", GameQuirk::RestoreComputeSigOnNonNvidia, GameQuirk::DisableDxgiSpoofing),
-    QUIRK_ENTRY("monsterhunterwilds.exe", GameQuirk::RestoreComputeSigOnNonNvidia, GameQuirk::DisableDxgiSpoofing),
-    QUIRK_ENTRY("monsterhunterrise.exe", GameQuirk::RestoreComputeSigOnNonNvidia), // Seems to fix real DLSS
+    QUIRK_ENTRY("monsterhunterwilds.exe", GameQuirk::RestoreComputeSigOnNonNvidia, GameQuirk::DisableDxgiSpoofing,
+                GameQuirk::RestoreComputeSigOnNvidia),
+    QUIRK_ENTRY("monsterhunterrise.exe", GameQuirk::RestoreComputeSigOnNvidia), // Seems to fix real DLSS
 
     // Crysis 3 Remastered
     // no spoof needed for DLSS inputs
@@ -199,6 +202,9 @@ static const QuirkEntry quirkTable[] = {
     QUIRK_ENTRY("minecraft.windows.exe", GameQuirk::KernelBaseHooks),
     QUIRK_ENTRY("prey.exe", GameQuirk::DontUseNTShared, GameQuirk::DisableOptiXessPipelineCreation,
                 GameQuirk::DisableDxgiSpoofing),
+    QUIRK_ENTRY("gwt.exe", GameQuirk::ForceUnrealEngine),
+    QUIRK_ENTRY("hogwartslegacy.exe", GameQuirk::ForceUnrealEngine),
+    QUIRK_ENTRY("roadcraft - retail.exe", GameQuirk::FixSlSimulationMarkers),
 
     // VULKAN
     // ------
@@ -261,6 +267,8 @@ static void printQuirks(flag_set<GameQuirk>& quirks)
         spdlog::info("Quirk: Disable Reactive Masks");
     if (quirks & GameQuirk::RestoreComputeSigOnNonNvidia)
         spdlog::info("Quirk: Enabling restore compute signature on AMD/Intel");
+    if (quirks & GameQuirk::RestoreComputeSigOnNvidia)
+        spdlog::info("Quirk: Enabling restore compute signature on Nvidia");
     if (quirks & GameQuirk::DisableDxgiSpoofing)
         spdlog::info("Quirk: Dxgi spoofing disabled by default");
     if (quirks & GameQuirk::DisableUseFsrInputValues)
@@ -275,6 +283,8 @@ static void printQuirks(flag_set<GameQuirk>& quirks)
         spdlog::info("Quirk: Skipping upscaling for first 10 frames");
     if (quirks & GameQuirk::NoFSRFGFirstSwapchain)
         spdlog::info("Quirk: Skip turning the first swapchain created into an FSR swapchain");
+    if (quirks & GameQuirk::FixSlSimulationMarkers)
+        spdlog::info("Quirk: Correct simulation start marker's frame id");
 
     return;
 }

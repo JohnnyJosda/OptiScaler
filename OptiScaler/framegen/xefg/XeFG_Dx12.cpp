@@ -238,6 +238,15 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
     LOG_DEBUG("Jittered Velocity: {}", Config::Instance()->FGXeFGJitteredMV.value_or_default());
     LOG_DEBUG("High Res MV: {}", Config::Instance()->FGXeFGHighResMV.value_or_default());
 
+    if (Config::Instance()->FGXeFGDepthInverted.value_or_default())
+        _constants.flags |= FG_Flags::InvertedDepth;
+
+    if (Config::Instance()->FGXeFGJitteredMV.value_or_default())
+        _constants.flags |= FG_Flags::JitteredMVs;
+
+    if (Config::Instance()->FGXeFGHighResMV.value_or_default())
+        _constants.flags |= FG_Flags::DisplayResolutionMVs;
+
     auto result = XeFGProxy::D3D12InitFromSwapChainDesc()(_swapChainContext, hwnd, &scDesc, &fsDesc, realQueue,
                                                           factory12, &params);
 
@@ -315,6 +324,15 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
     LOG_DEBUG("Jittered Velocity: {}", Config::Instance()->FGXeFGJitteredMV.value_or_default());
     LOG_DEBUG("High Res MV: {}", Config::Instance()->FGXeFGHighResMV.value_or_default());
 
+    if (Config::Instance()->FGXeFGDepthInverted.value_or_default())
+        _constants.flags |= FG_Flags::InvertedDepth;
+
+    if (Config::Instance()->FGXeFGJitteredMV.value_or_default())
+        _constants.flags |= FG_Flags::JitteredMVs;
+
+    if (Config::Instance()->FGXeFGHighResMV.value_or_default())
+        _constants.flags |= FG_Flags::DisplayResolutionMVs;
+
     auto result = XeFGProxy::D3D12InitFromSwapChainDesc()(_swapChainContext, hwnd, desc, pFullscreenDesc, realQueue,
                                                           factory12, &params);
 
@@ -344,7 +362,6 @@ void XeFG_Dx12::CreateContext(ID3D12Device* device, FG_Constants& fgConstants)
     LOG_DEBUG("");
 
     _device = device;
-    _constants = fgConstants;
 
     if (_fgContext == nullptr && _swapChainContext != nullptr)
     {
@@ -466,8 +483,12 @@ bool XeFG_Dx12::Dispatch()
 
     // Cyberpunk seems to be sending LH so do the same
     // it also sends some extra data in usually empty spots but no idea what that is
-    if (_cameraNear[fIndex] > 0.f && _cameraFar[fIndex] > 0.f)
+    if (_cameraNear[fIndex] > 0.f && _cameraFar[fIndex] > 0.f && _cameraVFov[fIndex] > 0.00001f &&
+        _cameraAspectRatio[fIndex] > 0.00001f)
     {
+        if (XMScalarNearEqual(_cameraNear[fIndex], _cameraFar[fIndex], 0.00001f))
+            _cameraFar[fIndex]++;
+
         auto projectionMatrix = XMMatrixPerspectiveFovLH(_cameraVFov[fIndex], _cameraAspectRatio[fIndex],
                                                          _cameraNear[fIndex], _cameraFar[fIndex]);
         memcpy(constData.projectionMatrix, projectionMatrix.r, sizeof(projectionMatrix));
@@ -553,8 +574,6 @@ void* XeFG_Dx12::SwapchainContext() { return _swapChainContext; }
 void XeFG_Dx12::EvaluateState(ID3D12Device* device, FG_Constants& fgConstants)
 {
     LOG_FUNC();
-
-    _constants = fgConstants;
 
     // If needed hooks are missing or XeFG proxy is not inited or FG swapchain is not created
     if (!Config::Instance()->OverlayMenu.value_or_default() || !XeFGProxy::InitXeFG() ||

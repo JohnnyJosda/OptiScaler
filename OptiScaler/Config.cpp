@@ -153,6 +153,7 @@ bool Config::Reload(std::filesystem::path iniPath)
             FGXeFGJitteredMV.set_from_config(readBool("XeFG", "JitteredMV"));
             FGXeFGHighResMV.set_from_config(readBool("XeFG", "HighResMV"));
             FGXeFGDebugView.set_from_config(readBool("XeFG", "DebugView"));
+            FGXeFGForceBorderless.set_from_config(readBool("XeFG", "ForceBorderless"));
         }
 
         // Framerate
@@ -600,7 +601,7 @@ bool Config::Reload(std::filesystem::path iniPath)
         // V-Sync
         {
             ForceVsync.set_from_config(readBool("V-Sync", "ForceVsync"));
-            VsyncInterval.set_from_config(readBool("V-Sync", "SyncInterval"));
+            VsyncInterval.set_from_config(readInt("V-Sync", "SyncInterval"));
         }
 
         if (fakenvapi::isUsingFakenvapi())
@@ -750,6 +751,8 @@ bool Config::SaveIni()
         ini.SetValue("XeFG", "JitteredMV", GetBoolValue(Instance()->FGXeFGJitteredMV.value_for_config()).c_str());
         ini.SetValue("XeFG", "HighResMV", GetBoolValue(Instance()->FGXeFGHighResMV.value_for_config()).c_str());
         ini.SetValue("XeFG", "DebugView", GetBoolValue(Instance()->FGXeFGDebugView.value_for_config()).c_str());
+        ini.SetValue("XeFG", "ForceBorderless",
+                     GetBoolValue(Instance()->FGXeFGForceBorderless.value_for_config()).c_str());
     }
 
     // OptiFG

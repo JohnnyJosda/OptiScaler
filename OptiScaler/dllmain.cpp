@@ -5,7 +5,7 @@
 #include "Logger.h"
 #include "resource.h"
 #include "DllNames.h"
-#include "FSR4Upgrade.h"
+#include "fsr4/FSR4Upgrade.h"
 
 #include "proxies/Dxgi_Proxy.h"
 #include <proxies/XeSS_Proxy.h>
@@ -208,6 +208,8 @@ void LoadAsiPlugins()
 
                     if (pr)
                     {
+                        State::Instance().isOptiPatcherSucceed = true;
+
                         LOG_INFO("Game patching is successful, disabling spoofing");
 
                         if (!Config::Instance()->DxgiSpoofing.has_value())
@@ -818,6 +820,14 @@ static void CheckWorkingMode()
                 StreamlineHooks::hookReflex(slReflex);
             }
 
+            HMODULE slPcl = nullptr;
+            slPcl = GetDllNameWModule(&slPclNamesW);
+            if (slPcl != nullptr)
+            {
+                LOG_DEBUG("sl.pcl.dll already in memory");
+                StreamlineHooks::hookPcl(slPcl);
+            }
+
             HMODULE slCommon = nullptr;
             slCommon = GetDllNameWModule(&slCommonNamesW);
             if (slCommon != nullptr)
@@ -984,6 +994,12 @@ static void CheckQuirks()
 
     if (quirks & GameQuirk::RestoreComputeSigOnNonNvidia && !State::Instance().isRunningOnNvidia &&
         !Config::Instance()->DxgiSpoofing.value_or_default() &&
+        !Config::Instance()->RestoreComputeSignature.has_value())
+    {
+        Config::Instance()->RestoreComputeSignature.set_volatile_value(true);
+    }
+
+    if (quirks & GameQuirk::RestoreComputeSigOnNvidia && State::Instance().isRunningOnNvidia &&
         !Config::Instance()->RestoreComputeSignature.has_value())
     {
         Config::Instance()->RestoreComputeSignature.set_volatile_value(true);
@@ -1194,8 +1210,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
                 if (!Config::Instance()->DxgiSpoofing.has_value())
                     Config::Instance()->DxgiSpoofing.set_volatile_value(false);
 
-                if (!Config::Instance()->StreamlineSpoofing.has_value())
-                    Config::Instance()->StreamlineSpoofing.set_volatile_value(false);
+                // StreamlineSpoofing is more selective on Nvidia now
+                // if (!Config::Instance()->StreamlineSpoofing.has_value())
+                //    Config::Instance()->StreamlineSpoofing.set_volatile_value(false);
             }
             else
             {

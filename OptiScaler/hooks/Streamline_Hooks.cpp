@@ -11,6 +11,7 @@
 #include <magic_enum.hpp>
 #include <sl1_reflex.h>
 #include "include/sl.param/parameters.h"
+#include <nvapi/fakenvapi.h>
 
 sl::RenderAPI StreamlineHooks::renderApi = sl::RenderAPI::eCount;
 std::mutex StreamlineHooks::setConstantsMutex {};
@@ -24,6 +25,7 @@ decltype(&slAllocateResources) StreamlineHooks::o_slAllocateResources = nullptr;
 decltype(&slSetConstants) StreamlineHooks::o_slSetConstants = nullptr;
 decltype(&slGetNativeInterface) StreamlineHooks::o_slGetNativeInterface = nullptr;
 decltype(&slSetD3DDevice) StreamlineHooks::o_slSetD3DDevice = nullptr;
+decltype(&slGetNewFrameToken) StreamlineHooks::o_slGetNewFrameToken = nullptr;
 
 decltype(&sl1::slInit) StreamlineHooks::o_slInit_sl1 = nullptr;
 
@@ -45,6 +47,10 @@ StreamlineHooks::PFN_slSetConstants_sl1 StreamlineHooks::o_reflex_slSetConstants
 StreamlineHooks::PFN_slOnPluginLoad StreamlineHooks::o_reflex_slOnPluginLoad = nullptr;
 decltype(&slReflexSetOptions) StreamlineHooks::o_slReflexSetOptions = nullptr;
 sl::ReflexMode StreamlineHooks::reflexGamesLastMode = sl::ReflexMode::eOff;
+
+// PCL
+StreamlineHooks::PFN_slGetPluginFunction StreamlineHooks::o_pcl_slGetPluginFunction = nullptr;
+decltype(&slPCLSetMarker) StreamlineHooks::o_slPCLSetMarker = nullptr;
 
 // Common
 StreamlineHooks::PFN_slGetPluginFunction StreamlineHooks::o_common_slGetPluginFunction = nullptr;
@@ -308,32 +314,7 @@ struct SystemCapsSl15
     bool hwSchedulingEnabled {};
 };
 
-bool StreamlineHooks::hkdlss_slOnPluginLoad(void* params, const char* loaderJSON, const char** pluginJSON)
-{
-    LOG_FUNC();
-
-    // TODO: do it better than "static" and hoping for the best
-    static std::string config;
-
-    auto result = o_dlss_slOnPluginLoad(params, loaderJSON, pluginJSON);
-
-    if (Config::Instance()->VulkanExtensionSpoofing.value_or_default())
-    {
-        nlohmann::json configJson = nlohmann::json::parse(*pluginJSON);
-
-        configJson["external"]["vk"]["instance"]["extensions"].clear();
-        configJson["external"]["vk"]["device"]["extensions"].clear();
-        configJson["external"]["vk"]["device"]["1.2_features"].clear();
-
-        config = configJson.dump();
-
-        *pluginJSON = config.c_str();
-    }
-
-    return result;
-}
-
-void setSystemCapsArch(sl::param::IParameters* params, uint32_t arch)
+void setSystemCapsArch(sl::param::IParameters* params, uint32_t arch, sl::Feature feature)
 {
     if (State::Instance().streamlineVersion.major > 1)
     {
@@ -344,7 +325,35 @@ void setSystemCapsArch(sl::param::IParameters* params, uint32_t arch)
         {
             for (auto& adapter : caps->adapters)
             {
-                if ((uint32_t) adapter.vendor != 0)
+                LOG_TRACE("vendor: {}, feature: {}, original arch: {:X}", (uint32_t) adapter.vendor, feature,
+                          adapter.architecture);
+                if (adapter.vendor == VendorId::Nvidia && !fakenvapi::isUsingFakenvapi())
+                {
+                    // Don't change arch for DLSS with turing and above
+                    if (feature == sl::kFeatureDLSS)
+                    {
+                        if (adapter.architecture < NV_GPU_ARCHITECTURE_TU100)
+                            adapter.architecture = arch;
+                        break;
+                    }
+
+                    // Don't change arch for DLSSD with turing and above
+                    else if (feature == sl::kFeatureDLSS_RR)
+                    {
+                        if (adapter.architecture < NV_GPU_ARCHITECTURE_TU100)
+                            adapter.architecture = arch;
+                        break;
+                    }
+
+                    // Don't change arch for DLSSG with turing and above
+                    else if (feature == sl::kFeatureDLSS_G)
+                    {
+                        if (adapter.architecture < NV_GPU_ARCHITECTURE_AD100)
+                            adapter.architecture = arch;
+                        break;
+                    }
+                }
+                else if ((uint32_t) adapter.vendor != 0)
                 {
                     adapter.vendor = VendorId::Nvidia;
                     adapter.architecture = arch;
@@ -365,8 +374,34 @@ void setSystemCapsArch(sl::param::IParameters* params, uint32_t arch)
 
         if (caps)
         {
-            caps->architecture[0] = arch;
-            caps->driverVersionMajor = 999;
+            if (!fakenvapi::isUsingFakenvapi())
+            {
+                // Don't change arch for DLSS with turing and above
+                if (feature == sl::kFeatureDLSS)
+                {
+                    if (caps->architecture[0] < NV_GPU_ARCHITECTURE_TU100)
+                        caps->architecture[0] = arch;
+                }
+
+                // Don't change arch for DLSSD with turing and above
+                else if (feature == sl::kFeatureDLSS_RR)
+                {
+                    if (caps->architecture[0] < NV_GPU_ARCHITECTURE_TU100)
+                        caps->architecture[0] = arch;
+                }
+
+                // Don't change arch for DLSSG with turing and above
+                else if (feature == sl::kFeatureDLSS_G)
+                {
+                    if (caps->architecture[0] < NV_GPU_ARCHITECTURE_AD100)
+                        caps->architecture[0] = arch;
+                }
+            }
+            else
+            {
+                caps->architecture[0] = arch;
+                caps->driverVersionMajor = 999;
+            }
 
             // This will write outside the struct if SystemCaps is smaller than expected
             // Witcher 3 (sl 1.5) uses this layout
@@ -374,6 +409,34 @@ void setSystemCapsArch(sl::param::IParameters* params, uint32_t arch)
             caps->hwSchedulingEnabled = true;
         }
     }
+}
+
+bool StreamlineHooks::hkdlss_slOnPluginLoad(void* params, const char* loaderJSON, const char** pluginJSON)
+{
+    LOG_FUNC();
+
+    // TODO: do it better than "static" and hoping for the best
+    static std::string config;
+
+    if (Config::Instance()->StreamlineSpoofing.value_or_default())
+        setSystemCapsArch((sl::param::IParameters*) params, UINT_MAX, sl::kFeatureDLSS);
+
+    auto result = o_dlss_slOnPluginLoad(params, loaderJSON, pluginJSON);
+
+    if (Config::Instance()->VulkanExtensionSpoofing.value_or_default())
+    {
+        nlohmann::json configJson = nlohmann::json::parse(*pluginJSON);
+
+        configJson["external"]["vk"]["instance"]["extensions"].clear();
+        configJson["external"]["vk"]["device"]["extensions"].clear();
+        configJson["external"]["vk"]["device"]["1.2_features"].clear();
+
+        config = configJson.dump();
+
+        *pluginJSON = config.c_str();
+    }
+
+    return result;
 }
 
 bool StreamlineHooks::hkdlssg_slOnPluginLoad(void* params, const char* loaderJSON, const char** pluginJSON)
@@ -384,16 +447,16 @@ bool StreamlineHooks::hkdlssg_slOnPluginLoad(void* params, const char* loaderJSO
     static std::string config;
 
     bool skipArchSpoof =
-        !(Config::Instance()->StreamlineSpoofing.value_or_default() &&
-          (Config::Instance()->FGInput == FGInput::Nukems || Config::Instance()->FGInput == FGInput::DLSSG));
+        Config::Instance()->StreamlineSpoofing.value_or_default() &&
+        !(Config::Instance()->FGInput == FGInput::Nukems || Config::Instance()->FGInput == FGInput::DLSSG);
 
     if (skipArchSpoof)
-        setSystemCapsArch((sl::param::IParameters*) params, 0);
+        setSystemCapsArch((sl::param::IParameters*) params, 0, sl::kFeatureDLSS_G);
 
     auto result = o_dlssg_slOnPluginLoad(params, loaderJSON, pluginJSON);
 
     if (skipArchSpoof)
-        setSystemCapsArch((sl::param::IParameters*) params, UINT_MAX);
+        setSystemCapsArch((sl::param::IParameters*) params, UINT_MAX, sl::kFeatureDLSS_G);
 
     nlohmann::json configJson = nlohmann::json::parse(*pluginJSON);
 
@@ -452,35 +515,36 @@ bool StreamlineHooks::hkcommon_slOnPluginLoad(void* params, const char* loaderJS
     //    *pluginJSON = config.c_str();
     //}
 
+    // For the common plugin, spoof only architectures older than Turing (or not-Nvidia)
     if (Config::Instance()->StreamlineSpoofing.value_or_default())
-        setSystemCapsArch((sl::param::IParameters*) params, UINT_MAX);
+        setSystemCapsArch((sl::param::IParameters*) params, UINT_MAX, sl::kFeatureDLSS);
 
     return result;
 }
 
 sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewport, const sl::DLSSGOptions& options)
 {
-    if (State::Instance().api != API::Vulkan)
-        return o_slDLSSGSetOptions(viewport, options);
+    // Make DLSSG auto always mean On
+    sl::DLSSGOptions newOptions = options;
+    newOptions.mode = newOptions.mode == sl::DLSSGMode::eOff ? sl::DLSSGMode::eOff : sl::DLSSGMode::eOn;
 
-    // Only matters for Vulkan, DX doesn't use this delay
-    if (options.mode != sl::DLSSGMode::eOff && !MenuOverlayBase::IsVisible())
-        State::Instance().delayMenuRenderBy = 10;
-
-    if (MenuOverlayBase::IsVisible())
+    if (State::Instance().api == API::Vulkan)
     {
-        sl::DLSSGOptions newOptions = options;
-        newOptions.mode = sl::DLSSGMode::eOff;
-        newOptions.flags |= sl::DLSSGFlags::eRetainResourcesWhenOff;
+        // Only matters for Vulkan, DX doesn't use this delay
+        if (options.mode != sl::DLSSGMode::eOff && !MenuOverlayBase::IsVisible())
+            State::Instance().delayMenuRenderBy = 10;
 
-        LOG_TRACE("DLSSG Modified Mode: {}", (uint32_t) newOptions.mode);
-        ReflexHooks::setDlssgDetectedState(false);
-        return o_slDLSSGSetOptions(viewport, newOptions);
+        if (MenuOverlayBase::IsVisible())
+        {
+            newOptions.mode = sl::DLSSGMode::eOff;
+            newOptions.flags |= sl::DLSSGFlags::eRetainResourcesWhenOff;
+            ReflexHooks::setDlssgDetectedState(false);
+        }
     }
 
-    // Can't tell if eAuto means enabled or disabled
-    ReflexHooks::setDlssgDetectedState(options.mode == sl::DLSSGMode::eOn);
-    return o_slDLSSGSetOptions(viewport, options);
+    LOG_TRACE("DLSSG Modified Mode: {}", magic_enum::enum_name(newOptions.mode));
+
+    return o_slDLSSGSetOptions(viewport, newOptions);
 }
 
 bool StreamlineHooks::hkreflex_slOnPluginLoad(void* params, const char* loaderJSON, const char** pluginJSON)
@@ -528,8 +592,18 @@ void* StreamlineHooks::hkdlssg_slGetPluginFunction(const char* functionName)
         return &hkdlssg_slOnPluginLoad;
     }
 
-    if (strcmp(functionName, "slDLSSGSetOptions") == 0 && State::Instance().api == API::Vulkan)
+    if (strcmp(functionName, "slDLSSGSetOptions") == 0)
     {
+        // Give steam overlay the original as it seems to be hooking it
+        auto steamOverlay = KernelBaseProxy::GetModuleHandleA_()("gameoverlayrenderer64.dll");
+        if (steamOverlay != nullptr)
+        {
+            if (HMODULE callerModule = Util::GetCallerModule(_ReturnAddress()); callerModule == steamOverlay)
+            {
+                return o_dlssg_slGetPluginFunction(functionName);
+            }
+        }
+
         o_slDLSSGSetOptions = (decltype(&slDLSSGSetOptions)) o_dlssg_slGetPluginFunction(functionName);
         return &hkslDLSSGSetOptions;
     }
@@ -580,6 +654,45 @@ void* StreamlineHooks::hkreflex_slGetPluginFunction(const char* functionName)
     }
 
     return o_reflex_slGetPluginFunction(functionName);
+}
+
+sl::Result StreamlineHooks::hkslPCLSetMarker(sl::PCLMarker marker, const sl::FrameToken& frame)
+{
+    // HACK for broken games
+    static uint64_t last_simulation_end_id = 0;
+    if (marker == sl::PCLMarker::eSimulationEnd)
+    {
+        last_simulation_end_id = frame;
+    }
+
+    if (marker == sl::PCLMarker::eSimulationStart && last_simulation_end_id >= frame && o_slGetNewFrameToken)
+    {
+        const uint64_t correction_offset = last_simulation_end_id - frame + 1;
+        uint32_t newFrameId = frame + correction_offset;
+
+        sl::FrameToken* newFramePointer {};
+        auto result = o_slGetNewFrameToken(newFramePointer, &newFrameId);
+
+        LOG_WARN("Simulation start marker sent after end marker, offset: {}", correction_offset);
+
+        result = o_slPCLSetMarker(marker, *newFramePointer);
+        return result;
+    }
+
+    return o_slPCLSetMarker(marker, frame);
+}
+
+void* StreamlineHooks::hkpcl_slGetPluginFunction(const char* functionName)
+{
+    LOG_DEBUG("{}", functionName);
+
+    if (strcmp(functionName, "slPCLSetMarker") == 0)
+    {
+        o_slPCLSetMarker = (decltype(&slPCLSetMarker)) o_pcl_slGetPluginFunction(functionName);
+        return &hkslPCLSetMarker;
+    }
+
+    return o_pcl_slGetPluginFunction(functionName);
 }
 
 bool StreamlineHooks::hk_setVoid(void* self, const char* key, void** value)
@@ -762,6 +875,8 @@ void StreamlineHooks::hookInterposer(HMODULE slInterposer)
                 KernelBaseProxy::GetProcAddress_()(slInterposer, "slGetNativeInterface"));
             o_slSetD3DDevice = reinterpret_cast<decltype(&slSetD3DDevice)>(
                 KernelBaseProxy::GetProcAddress_()(slInterposer, "slSetD3DDevice"));
+            o_slGetNewFrameToken = reinterpret_cast<decltype(&slGetNewFrameToken)>(
+                KernelBaseProxy::GetProcAddress_()(slInterposer, "slGetNewFrameToken")); // Not hooked
 
             if (o_slInit != nullptr)
             {
@@ -955,6 +1070,55 @@ void StreamlineHooks::hookReflex(HMODULE slReflex)
         DetourUpdateThread(GetCurrentThread());
 
         DetourAttach(&(PVOID&) o_reflex_slGetPluginFunction, hkreflex_slGetPluginFunction);
+
+        DetourTransactionCommit();
+    }
+}
+
+// SL PCL
+
+void StreamlineHooks::unhookPcl()
+{
+    LOG_FUNC();
+
+    DetourTransactionBegin();
+    DetourUpdateThread(GetCurrentThread());
+
+    if (o_pcl_slGetPluginFunction)
+    {
+        DetourDetach(&(PVOID&) o_pcl_slGetPluginFunction, hkpcl_slGetPluginFunction);
+        o_pcl_slGetPluginFunction = nullptr;
+    }
+
+    DetourTransactionCommit();
+}
+
+void StreamlineHooks::hookPcl(HMODULE slPcl)
+{
+    LOG_FUNC();
+
+    if (!slPcl)
+    {
+        LOG_WARN("Pcl module in NULL");
+        return;
+    }
+
+    if (!(State::Instance().gameQuirks & GameQuirk::FixSlSimulationMarkers))
+        return;
+
+    if (o_pcl_slGetPluginFunction)
+        unhookPcl();
+
+    o_pcl_slGetPluginFunction =
+        reinterpret_cast<PFN_slGetPluginFunction>(KernelBaseProxy::GetProcAddress_()(slPcl, "slGetPluginFunction"));
+
+    if (o_pcl_slGetPluginFunction != nullptr)
+    {
+        LOG_TRACE("Hooking slGetPluginFunction in sl.pcl");
+        DetourTransactionBegin();
+        DetourUpdateThread(GetCurrentThread());
+
+        DetourAttach(&(PVOID&) o_pcl_slGetPluginFunction, hkpcl_slGetPluginFunction);
 
         DetourTransactionCommit();
     }

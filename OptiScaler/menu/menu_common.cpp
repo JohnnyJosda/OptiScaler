@@ -2930,6 +2930,9 @@ bool MenuCommon::RenderMenu()
                         if (State::Instance().SCExclusiveFullscreen)
                             ImGui::TextColored(ImVec4(1.f, 0.f, 0.f, 1.f), "Borderless display mode required");
 
+                        if (State::Instance().isHdrActive)
+                            ImGui::TextColored(ImVec4(1.0f, 0.647f, 0.0f, 1.f), "XeFG only supports HDR10");
+
                         ImGui::BeginDisabled(!State::Instance().currentFG->IsLowResMV() ||
                                              State::Instance().SCExclusiveFullscreen);
 
@@ -2964,10 +2967,12 @@ bool MenuCommon::RenderMenu()
                         bool fgBorderless = Config::Instance()->FGXeFGForceBorderless.value_or_default();
                         if (ImGui::Checkbox("Force Borderless", &fgBorderless))
                             Config::Instance()->FGXeFGForceBorderless = fgBorderless;
+
                         ShowHelpMarker("Forces borderless display mode\n\n"
-                                       "For best results set fullscreen resolution to\n"
-                                       "your display resolution\n"
-                                       "Might cause some INSTABILITY and GRAPHICAL ISSUES!");
+                                       "For best results set fullscreen \n"
+                                       "resolution to your display resolution\n"
+                                       "Might cause some instability issues.\n\n"
+                                       "NEEDS GAME RESTART TO BE ACTIVE");
 
                         // Disable this for now
                         // ImGui::SameLine(0.0f, 16.0f);
@@ -3332,6 +3337,8 @@ bool MenuCommon::RenderMenu()
                             {
                                 ImGui::TextColored(ImVec4(0.f, 1.f, 0.25f, 1.f), "ON");
 
+                                ImGui::BeginDisabled(!fgOutput->IsUsingUI());
+
                                 // TODO: doesn't check if the UI is available, and doesn't save to config
                                 if (bool drawUIOverFG = Config::Instance()->DrawUIOverFG.value_or_default();
                                     ImGui::Checkbox("Draw UI over FG", &drawUIOverFG))
@@ -3343,6 +3350,8 @@ bool MenuCommon::RenderMenu()
                                         Config::Instance()->UIPremultipliedAlpha.value_or_default();
                                     ImGui::Checkbox("UI Premult. alpha", &uiPremultipliedAlpha))
                                     Config::Instance()->UIPremultipliedAlpha = uiPremultipliedAlpha;
+
+                                ImGui::EndDisabled();
                             }
                             else
                             {

@@ -232,7 +232,7 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
     if (Config::Instance()->FGXeFGHighResMV.value_or_default())
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_HIGH_RES_MV;
 
-    if (!Config::Instance()->UIPremultipliedAlpha.value_or_default())
+    if (!Config::Instance()->FGUIPremultipliedAlpha.value_or_default())
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_UITEXTURE_NOT_PREMUL_ALPHA;
 
     LOG_DEBUG("Inverted Depth: {}", Config::Instance()->FGXeFGDepthInverted.value_or_default());
@@ -318,7 +318,7 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
     if (Config::Instance()->FGXeFGHighResMV.value_or_default())
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_HIGH_RES_MV;
 
-    if (!Config::Instance()->UIPremultipliedAlpha.value_or_default())
+    if (!Config::Instance()->FGUIPremultipliedAlpha.value_or_default())
         params.initFlags |= XEFG_SWAPCHAIN_INIT_FLAG_UITEXTURE_NOT_PREMUL_ALPHA;
 
     LOG_DEBUG("Inverted Depth: {}", Config::Instance()->FGXeFGDepthInverted.value_or_default());
@@ -484,8 +484,9 @@ bool XeFG_Dx12::Dispatch()
 
     // Cyberpunk seems to be sending LH so do the same
     // it also sends some extra data in usually empty spots but no idea what that is
-    if (_cameraNear[fIndex] > 0.f && _cameraFar[fIndex] > 0.f && _cameraVFov[fIndex] > 0.00001f &&
-        _cameraAspectRatio[fIndex] > 0.00001f)
+    if (_cameraNear[fIndex] > 0.f && _cameraFar[fIndex] > 0.f &&
+        !XMScalarNearEqual(_cameraVFov[fIndex], 0.0f, 0.00001f) &&
+        !XMScalarNearEqual(_cameraAspectRatio[fIndex], 0.0f, 0.00001f))
     {
         if (XMScalarNearEqual(_cameraNear[fIndex], _cameraFar[fIndex], 0.00001f))
             _cameraFar[fIndex]++;
@@ -670,7 +671,58 @@ void XeFG_Dx12::ReleaseObjects()
     _depthFlip.reset();
 }
 
-void XeFG_Dx12::CreateObjects(ID3D12Device* InDevice) { _device = InDevice; }
+void XeFG_Dx12::CreateObjects(ID3D12Device* InDevice)
+{
+    _device = InDevice;
+
+    if (_uiCommandAllocator != nullptr)
+        ReleaseObjects();
+
+    LOG_DEBUG("");
+
+    do
+    {
+        HRESULT result;
+        ID3D12CommandAllocator* allocator = nullptr;
+        ID3D12GraphicsCommandList* cmdList = nullptr;
+        ID3D12CommandQueue* cmdQueue = nullptr;
+
+        // FG
+        for (size_t i = 0; i < BUFFER_COUNT; i++)
+        {
+            result =
+                InDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&_uiCommandAllocator[i]));
+            if (result != S_OK)
+            {
+                LOG_ERROR("CreateCommandAllocators _uiCommandAllocator[{}]: {:X}", i, (unsigned long) result);
+                break;
+            }
+
+            _uiCommandAllocator[i]->SetName(std::format(L"_uiCommandAllocator[{}]", i).c_str());
+            if (CheckForRealObject(__FUNCTION__, _uiCommandAllocator[i], (IUnknown**) &allocator))
+                _uiCommandAllocator[i] = allocator;
+
+            result = InDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, _uiCommandAllocator[i], NULL,
+                                                 IID_PPV_ARGS(&_uiCommandList[i]));
+            if (result != S_OK)
+            {
+                LOG_ERROR("CreateCommandList _hudlessCommandList[{}]: {:X}", i, (unsigned long) result);
+                break;
+            }
+            _uiCommandList[i]->SetName(std::format(L"_uiCommandList[{}]", i).c_str());
+            if (CheckForRealObject(__FUNCTION__, _uiCommandList[i], (IUnknown**) &cmdList))
+                _uiCommandList[i] = cmdList;
+
+            result = _uiCommandList[i]->Close();
+            if (result != S_OK)
+            {
+                LOG_ERROR("_uiCommandList[{}]->Close: {:X}", i, (unsigned long) result);
+                break;
+            }
+        }
+
+    } while (false);
+}
 
 bool XeFG_Dx12::Present()
 {
@@ -708,7 +760,10 @@ void XeFG_Dx12::SetResource(Dx12Resource* inputResource)
     auto fIndex = GetIndex();
     auto& type = inputResource->type;
 
-    if (type == FG_ResourceType::HudlessColor && Config::Instance()->DisableHudless.value_or_default())
+    if (type == FG_ResourceType::HudlessColor && Config::Instance()->FGDisableHudless.value_or_default())
+        return;
+
+    if (type == FG_ResourceType::UIColor && Config::Instance()->FGDisableUI.value_or_default())
         return;
 
     std::lock_guard<std::mutex> lock(_frMutex);
@@ -806,6 +861,17 @@ void XeFG_Dx12::SetResource(Dx12Resource* inputResource)
 void XeFG_Dx12::SetResourceReady(FG_ResourceType type) { _resourceReady[GetIndex()][type] = true; }
 
 void XeFG_Dx12::SetCommandQueue(FG_ResourceType type, ID3D12CommandQueue* queue) { _gameCommandQueue = queue; }
+
+ID3D12GraphicsCommandList* XeFG_Dx12::GetUICommandList(int index)
+{
+    if (index < 0)
+        index = GetIndex();
+
+    _uiCommandAllocator[index]->Reset();
+    _uiCommandList[index]->Reset(_uiCommandAllocator[index], nullptr);
+
+    return _uiCommandList[index];
+}
 
 bool XeFG_Dx12::ReleaseSwapchain(HWND hwnd)
 {

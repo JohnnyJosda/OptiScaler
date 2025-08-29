@@ -482,7 +482,7 @@ ffxReturnCode_t ffxConfigure_Dx12FG(ffxContext* context, ffxConfigureDescHeader*
                                 "FFX_FRAMEGENERATION_UI_COMPOSITION_FLAG_ENABLE_INTERNAL_UI_DOUBLE_BUFFERING is set!");
 
                             // Not sure which cmdList to use
-                            validity = FG_ResourceValidity::ValidNow;
+                            // validity = FG_ResourceValidity::ValidNow;
                         }
 
                         Dx12Resource ui {};
@@ -608,37 +608,37 @@ ffxReturnCode_t ffxQuery_Dx12FG(ffxContext* context, ffxQueryDescHeader* desc)
     }
     else if (desc->type == FFX_API_QUERY_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_INTERPOLATIONCOMMANDLIST_DX12)
     {
-        auto cDesc = (ffxQueryDescFrameGenerationSwapChainInterpolationCommandListDX12*) desc;
-        auto fg = State::Instance().currentFG;
+        // auto cDesc = (ffxQueryDescFrameGenerationSwapChainInterpolationCommandListDX12*) desc;
+        // auto fg = State::Instance().currentFG;
 
-        if (fg != nullptr)
-        {
-            *cDesc->pOutCommandList = fg->GetUICommandList();
-            LOG_DEBUG("Returning cmdList: {:X}", (size_t) *cDesc->pOutCommandList);
-        }
+        // if (fg != nullptr)
+        //{
+        //     *cDesc->pOutCommandList = fg->GetUICommandList();
+        //     LOG_DEBUG("Returning cmdList: {:X}", (size_t) *cDesc->pOutCommandList);
+        // }
 
         return FFX_API_RETURN_OK;
     }
     else if (desc->type == FFX_API_QUERY_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_INTERPOLATIONTEXTURE_DX12)
     {
-        auto fg = State::Instance().currentFG;
-        if (fg != nullptr)
-        {
-            IDXGISwapChain3* sc = (IDXGISwapChain3*) State::Instance().currentFGSwapchain;
-            auto scIndex = sc->GetCurrentBackBufferIndex();
+        // auto fg = State::Instance().currentFG;
+        // if (fg != nullptr)
+        //{
+        //     IDXGISwapChain3* sc = (IDXGISwapChain3*) State::Instance().currentFGSwapchain;
+        //     auto scIndex = sc->GetCurrentBackBufferIndex();
 
-            ID3D12Resource* currentBuffer = nullptr;
-            sc->GetBuffer(scIndex, IID_PPV_ARGS(&currentBuffer));
-            currentBuffer->SetName(std::format(L"currentBuffer[{}]", scIndex).c_str());
+        //    ID3D12Resource* currentBuffer = nullptr;
+        //    sc->GetBuffer(scIndex, IID_PPV_ARGS(&currentBuffer));
+        //    currentBuffer->SetName(std::format(L"currentBuffer[{}]", scIndex).c_str());
 
-            auto fIndex = fg->GetIndex();
-            if (_ui[fIndex] == nullptr)
-            {
-                CreateBufferResource(_device, currentBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, &_ui[fIndex]);
+        //    auto fIndex = fg->GetIndex();
+        //    if (_ui[fIndex] == nullptr)
+        //    {
+        //        CreateBufferResource(_device, currentBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, &_ui[fIndex]);
 
-                _ui[fIndex]->SetName(std::format(L"_ui[{}]", fIndex).c_str());
-            }
-        }
+        //        _ui[fIndex]->SetName(std::format(L"_ui[{}]", fIndex).c_str());
+        //    }
+        //}
 
         return FFX_API_RETURN_OK;
     }
@@ -674,6 +674,19 @@ ffxReturnCode_t ffxDispatch_Dx12FG(ffxContext* context, ffxDispatchDescHeader* d
             fg->SetInterpolationPos(cdDesc->generationRect.left, cdDesc->generationRect.top);
             fg->SetInterpolationRect(cdDesc->generationRect.width, cdDesc->generationRect.height);
             fg->SetReset(cdDesc->reset ? 1 : 0);
+
+            if (cdDesc->presentColor.resource != nullptr && fg->GetResource(FG_ResourceType::HudlessColor) == nullptr)
+            {
+                Dx12Resource hudless {};
+                hudless.cmdList = (ID3D12GraphicsCommandList*) cdDesc->commandList;
+                hudless.height = cdDesc->presentColor.description.height;
+                hudless.resource = (ID3D12Resource*) cdDesc->presentColor.resource;
+                hudless.state = GetD3D12State((FfxApiResourceState) cdDesc->presentColor.state);
+                hudless.type = FG_ResourceType::HudlessColor;
+                hudless.validity = FG_ResourceValidity::UntilPresent;
+                hudless.width = cdDesc->presentColor.description.width;
+                fg->SetResource(&hudless);
+            }
         }
 
         LOG_DEBUG("FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION");
@@ -805,21 +818,32 @@ void ffxPresentCallback()
     if (fg != nullptr && fg->IsActive() && !fg->IsPaused())
     {
         auto fIndex = fg->GetIndex();
-        auto cmdList = fg->GetUICommandList(fIndex);
-
-        cdfgp.commandList = cmdList;
 
         IDXGISwapChain3* sc = (IDXGISwapChain3*) State::Instance().currentFGSwapchain;
         auto scIndex = sc->GetCurrentBackBufferIndex();
 
         ID3D12Resource* currentBuffer = nullptr;
-        sc->GetBuffer(scIndex, IID_PPV_ARGS(&currentBuffer));
+        auto hr = sc->GetBuffer(scIndex, IID_PPV_ARGS(&currentBuffer));
+        if (hr != S_OK)
+        {
+            LOG_ERROR("sc->GetBuffer error: {:X}", (UINT) hr);
+            return;
+        }
+
         currentBuffer->SetName(std::format(L"currentBuffer[{}]", scIndex).c_str());
+        if (currentBuffer == nullptr)
+        {
+            LOG_ERROR("currentBuffer is nullptr!");
+            return;
+        }
 
         if (CreateBufferResource(_device, currentBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &_hudless[fIndex]))
-        {
             _hudless[fIndex]->SetName(std::format(L"_hudless[{}]", fIndex).c_str());
-        }
+        else
+            return;
+
+        auto cmdList = fg->GetUICommandList(fIndex);
+        cdfgp.commandList = cmdList;
 
         ResourceBarrier(cmdList, currentBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_SOURCE);
         ResourceBarrier(cmdList, _hudless[fIndex], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
@@ -838,19 +862,22 @@ void ffxPresentCallback()
 
         if (result == FFX_API_RETURN_OK)
         {
-            auto hDesc = _hudless[fIndex]->GetDesc();
-            Dx12Resource hudless {};
-            hudless.cmdList = cmdList;
-            hudless.height = hDesc.Height;
-            hudless.resource = _hudless[fIndex];
-            hudless.state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-            hudless.type = FG_ResourceType::HudlessColor;
-            hudless.validity = FG_ResourceValidity::JustTrackCmdlist;
-            hudless.width = hDesc.Width;
-            fg->SetResource(&hudless);
+            if (fg->GetResource(FG_ResourceType::HudlessColor, fIndex) == nullptr)
+            {
+                auto hDesc = _hudless[fIndex]->GetDesc();
+                Dx12Resource hudless {};
+                hudless.cmdList = cmdList;
+                hudless.height = hDesc.Height;
+                hudless.resource = _hudless[fIndex];
+                hudless.state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+                hudless.type = FG_ResourceType::HudlessColor;
+                hudless.validity = FG_ResourceValidity::JustTrackCmdlist;
+                hudless.width = hDesc.Width;
+                fg->SetResource(&hudless);
+            }
         }
 
-        auto hr = cmdList->Close();
+        hr = cmdList->Close();
         if (hr == S_OK)
         {
             ID3D12CommandList* cmdLists[1] = { cmdList };

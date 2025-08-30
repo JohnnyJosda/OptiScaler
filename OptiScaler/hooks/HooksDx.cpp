@@ -327,7 +327,7 @@ static HRESULT hkResizeBuffers(IDXGISwapChain* This, UINT BufferCount, UINT Widt
     //    Height = info.height;
     //}
 
-    if (State::Instance().SCExclusiveFullscreen)
+    if (State::Instance().activeFgOutput == FGOutput::XeFG)
     {
         DXGI_SWAP_CHAIN_DESC desc {};
         if (This->GetDesc(&desc) == S_OK)
@@ -343,6 +343,8 @@ static HRESULT hkResizeBuffers(IDXGISwapChain* This, UINT BufferCount, UINT Widt
             }
         }
     }
+
+    SwapChainFlags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
     auto result = o_FGSCResizeBuffers(This, BufferCount, Width, Height, NewFormat, SwapChainFlags);
     LOG_DEBUG("Result: {:X}, Caller: {}", (UINT) result, Util::WhoIsTheCaller(_ReturnAddress()));
@@ -413,7 +415,7 @@ static HRESULT hkResizeBuffers1(IDXGISwapChain* This, UINT BufferCount, UINT Wid
     //    Height = info.height;
     //}
 
-    if (State::Instance().SCExclusiveFullscreen)
+    if (State::Instance().activeFgOutput == FGOutput::XeFG)
     {
         DXGI_SWAP_CHAIN_DESC desc {};
         if (This->GetDesc(&desc) == S_OK)
@@ -428,6 +430,8 @@ static HRESULT hkResizeBuffers1(IDXGISwapChain* This, UINT BufferCount, UINT Wid
             }
         }
     }
+
+    SwapChainFlags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
     auto result = o_FGSCResizeBuffers1(This, BufferCount, Width, Height, Format, SwapChainFlags, pCreationNodeMask,
                                        ppPresentQueue);
@@ -1089,44 +1093,48 @@ static HRESULT hkCreateSwapChainForCoreWindow(IDXGIFactory2* pFactory, IUnknown*
                 }
             }
 
-            IDXGISwapChain3* sc3 = nullptr;
-            do
+            if (!Config::Instance()->SkipColorSpace.value_or_default())
             {
-                if ((*ppSwapChain)->QueryInterface(IID_PPV_ARGS(&sc3)) == S_OK)
+                IDXGISwapChain3* sc3 = nullptr;
+
+                do
                 {
-                    DXGI_COLOR_SPACE_TYPE hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
-
-                    if (Config::Instance()->UseHDR10.value_or_default())
-                        hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-
-                    UINT css = 0;
-
-                    auto result = sc3->CheckColorSpaceSupport(hdrCS, &css);
-
-                    if (result != S_OK)
+                    if ((*ppSwapChain)->QueryInterface(IID_PPV_ARGS(&sc3)) == S_OK)
                     {
-                        LOG_ERROR("CheckColorSpaceSupport error: {:X}", (UINT) result);
-                        break;
-                    }
+                        DXGI_COLOR_SPACE_TYPE hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
 
-                    if (DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT & css)
-                    {
-                        result = sc3->SetColorSpace1(hdrCS);
+                        if (Config::Instance()->UseHDR10.value_or_default())
+                            hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+
+                        UINT css = 0;
+
+                        auto result = sc3->CheckColorSpaceSupport(hdrCS, &css);
 
                         if (result != S_OK)
                         {
-                            LOG_ERROR("SetColorSpace1 error: {:X}", (UINT) result);
+                            LOG_ERROR("CheckColorSpaceSupport error: {:X}", (UINT) result);
                             break;
                         }
+
+                        if (DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT & css)
+                        {
+                            result = sc3->SetColorSpace1(hdrCS);
+
+                            if (result != S_OK)
+                            {
+                                LOG_ERROR("SetColorSpace1 error: {:X}", (UINT) result);
+                                break;
+                            }
+                        }
+
+                        LOG_INFO("HDR format and color space are set");
                     }
 
-                    LOG_INFO("HDR format and color space are set");
-                }
+                } while (false);
 
-            } while (false);
-
-            if (sc3 != nullptr)
-                sc3->Release();
+                if (sc3 != nullptr)
+                    sc3->Release();
+            }
         }
     }
 
@@ -1248,16 +1256,22 @@ static HRESULT hkCreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, DXGI
         cq->SetName(L"GameQueue");
         cq->Release();
 
-        // FG Init
         if (State::Instance().currentFG == nullptr)
         {
+            // FG Init
             if (State::Instance().activeFgOutput == FGOutput::FSRFG)
                 State::Instance().currentFG = new FSRFG_Dx12();
             else if (State::Instance().activeFgOutput == FGOutput::XeFG)
                 State::Instance().currentFG = new XeFG_Dx12();
         }
+        else
+        {
+            // FG Re-Init
+            if (State::Instance().currentFG->Hwnd() != pDesc->OutputWindow)
+                State::Instance().currentFG->ReleaseSwapchain(State::Instance().currentFG->Hwnd());
+        }
 
-        HooksDx::ReleaseDx12SwapChain(pDesc->OutputWindow);
+        // HooksDx::ReleaseDx12SwapChain(pDesc->OutputWindow);
 
         auto fg = State::Instance().currentFG;
 
@@ -1340,7 +1354,8 @@ static HRESULT hkCreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, DXGI
                 }
             }
 
-            if (Config::Instance()->ForceHDR.value_or_default())
+            if (Config::Instance()->ForceHDR.value_or_default() &&
+                !Config::Instance()->SkipColorSpace.value_or_default())
             {
                 IDXGISwapChain3* sc3 = nullptr;
 
@@ -1455,44 +1470,48 @@ static HRESULT hkCreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, DXGI
                 }
             }
 
-            IDXGISwapChain3* sc3 = nullptr;
-            do
+            if (!Config::Instance()->SkipColorSpace.value_or_default())
             {
-                if ((*ppSwapChain)->QueryInterface(IID_PPV_ARGS(&sc3)) == S_OK)
+                IDXGISwapChain3* sc3 = nullptr;
+
+                do
                 {
-                    DXGI_COLOR_SPACE_TYPE hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
-
-                    if (Config::Instance()->UseHDR10.value_or_default())
-                        hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-
-                    UINT css = 0;
-
-                    auto result = sc3->CheckColorSpaceSupport(hdrCS, &css);
-
-                    if (result != S_OK)
+                    if ((*ppSwapChain)->QueryInterface(IID_PPV_ARGS(&sc3)) == S_OK)
                     {
-                        LOG_ERROR("CheckColorSpaceSupport error: {:X}", (UINT) result);
-                        break;
-                    }
+                        DXGI_COLOR_SPACE_TYPE hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
 
-                    if (DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT & css)
-                    {
-                        result = sc3->SetColorSpace1(hdrCS);
+                        if (Config::Instance()->UseHDR10.value_or_default())
+                            hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+
+                        UINT css = 0;
+
+                        auto result = sc3->CheckColorSpaceSupport(hdrCS, &css);
 
                         if (result != S_OK)
                         {
-                            LOG_ERROR("SetColorSpace1 error: {:X}", (UINT) result);
+                            LOG_ERROR("CheckColorSpaceSupport error: {:X}", (UINT) result);
                             break;
                         }
+
+                        if (DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT & css)
+                        {
+                            result = sc3->SetColorSpace1(hdrCS);
+
+                            if (result != S_OK)
+                            {
+                                LOG_ERROR("SetColorSpace1 error: {:X}", (UINT) result);
+                                break;
+                            }
+                        }
+
+                        LOG_INFO("HDR format and color space are set");
                     }
 
-                    LOG_INFO("HDR format and color space are set");
-                }
+                } while (false);
 
-            } while (false);
-
-            if (sc3 != nullptr)
-                sc3->Release();
+                if (sc3 != nullptr)
+                    sc3->Release();
+            }
         }
     }
 
@@ -1610,16 +1629,22 @@ static HRESULT hkCreateSwapChainForHwnd(IDXGIFactory* This, IUnknown* pDevice, H
         cq->SetName(L"GameQueue");
         cq->Release();
 
-        // FG Init
         if (State::Instance().currentFG == nullptr)
         {
+            // FG Init
             if (State::Instance().activeFgOutput == FGOutput::FSRFG)
                 State::Instance().currentFG = new FSRFG_Dx12();
             else if (State::Instance().activeFgOutput == FGOutput::XeFG)
                 State::Instance().currentFG = new XeFG_Dx12();
         }
+        else
+        {
+            // FG Re-Init
+            if (State::Instance().currentFG->Hwnd() != hWnd)
+                State::Instance().currentFG->ReleaseSwapchain(State::Instance().currentFG->Hwnd());
+        }
 
-        HooksDx::ReleaseDx12SwapChain(hWnd);
+        // HooksDx::ReleaseDx12SwapChain(pDesc->OutputWindow);
 
         auto fg = State::Instance().currentFG;
 
@@ -1699,7 +1724,8 @@ static HRESULT hkCreateSwapChainForHwnd(IDXGIFactory* This, IUnknown* pDevice, H
                 }
             }
 
-            if (Config::Instance()->ForceHDR.value_or_default())
+            if (Config::Instance()->ForceHDR.value_or_default() &&
+                !Config::Instance()->SkipColorSpace.value_or_default())
             {
                 IDXGISwapChain3* sc3 = nullptr;
 
@@ -1811,43 +1837,46 @@ static HRESULT hkCreateSwapChainForHwnd(IDXGIFactory* This, IUnknown* pDevice, H
             }
 
             IDXGISwapChain3* sc3 = nullptr;
-            do
+            if (!Config::Instance()->SkipColorSpace.value_or_default())
             {
-                if ((*ppSwapChain)->QueryInterface(IID_PPV_ARGS(&sc3)) == S_OK)
+                do
                 {
-                    DXGI_COLOR_SPACE_TYPE hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
-
-                    if (Config::Instance()->UseHDR10.value_or_default())
-                        hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-
-                    UINT css = 0;
-
-                    auto result = sc3->CheckColorSpaceSupport(hdrCS, &css);
-
-                    if (result != S_OK)
+                    if ((*ppSwapChain)->QueryInterface(IID_PPV_ARGS(&sc3)) == S_OK)
                     {
-                        LOG_ERROR("CheckColorSpaceSupport error: {:X}", (UINT) result);
-                        break;
-                    }
+                        DXGI_COLOR_SPACE_TYPE hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
 
-                    if (DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT & css)
-                    {
-                        result = sc3->SetColorSpace1(hdrCS);
+                        if (Config::Instance()->UseHDR10.value_or_default())
+                            hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+
+                        UINT css = 0;
+
+                        auto result = sc3->CheckColorSpaceSupport(hdrCS, &css);
 
                         if (result != S_OK)
                         {
-                            LOG_ERROR("SetColorSpace1 error: {:X}", (UINT) result);
+                            LOG_ERROR("CheckColorSpaceSupport error: {:X}", (UINT) result);
                             break;
                         }
+
+                        if (DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT & css)
+                        {
+                            result = sc3->SetColorSpace1(hdrCS);
+
+                            if (result != S_OK)
+                            {
+                                LOG_ERROR("SetColorSpace1 error: {:X}", (UINT) result);
+                                break;
+                            }
+                        }
+
+                        LOG_INFO("HDR format and color space are set");
                     }
 
-                    LOG_INFO("HDR format and color space are set");
-                }
+                } while (false);
 
-            } while (false);
-
-            if (sc3 != nullptr)
-                sc3->Release();
+                if (sc3 != nullptr)
+                    sc3->Release();
+            }
         }
     }
 
@@ -2417,44 +2446,48 @@ static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVE
                 }
             }
 
-            IDXGISwapChain3* sc3 = nullptr;
-            do
+            if (!Config::Instance()->SkipColorSpace.value_or_default())
             {
-                if ((*ppSwapChain)->QueryInterface(IID_PPV_ARGS(&sc3)) == S_OK)
+                IDXGISwapChain3* sc3 = nullptr;
+
+                do
                 {
-                    DXGI_COLOR_SPACE_TYPE hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
-
-                    if (Config::Instance()->UseHDR10.value_or_default())
-                        hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-
-                    UINT css = 0;
-
-                    auto result = sc3->CheckColorSpaceSupport(hdrCS, &css);
-
-                    if (result != S_OK)
+                    if ((*ppSwapChain)->QueryInterface(IID_PPV_ARGS(&sc3)) == S_OK)
                     {
-                        LOG_ERROR("CheckColorSpaceSupport error: {:X}", (UINT) result);
-                        break;
-                    }
+                        DXGI_COLOR_SPACE_TYPE hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
 
-                    if (DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT & css)
-                    {
-                        result = sc3->SetColorSpace1(hdrCS);
+                        if (Config::Instance()->UseHDR10.value_or_default())
+                            hdrCS = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+
+                        UINT css = 0;
+
+                        auto result = sc3->CheckColorSpaceSupport(hdrCS, &css);
 
                         if (result != S_OK)
                         {
-                            LOG_ERROR("SetColorSpace1 error: {:X}", (UINT) result);
+                            LOG_ERROR("CheckColorSpaceSupport error: {:X}", (UINT) result);
                             break;
                         }
+
+                        if (DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT & css)
+                        {
+                            result = sc3->SetColorSpace1(hdrCS);
+
+                            if (result != S_OK)
+                            {
+                                LOG_ERROR("SetColorSpace1 error: {:X}", (UINT) result);
+                                break;
+                            }
+                        }
+
+                        LOG_INFO("HDR format and color space are set");
                     }
 
-                    LOG_INFO("HDR format and color space are set");
-                }
+                } while (false);
 
-            } while (false);
-
-            if (sc3 != nullptr)
-                sc3->Release();
+                if (sc3 != nullptr)
+                    sc3->Release();
+            }
         }
     }
 
@@ -3113,7 +3146,7 @@ void HooksDx::ReleaseDx12SwapChain(HWND hwnd)
 {
     State::Instance().currentSwapchain = nullptr;
 
-    IFGFeature_Dx12* fg = State::Instance().currentFG;
+    auto fg = State::Instance().currentFG;
     if (fg == nullptr)
         return;
 

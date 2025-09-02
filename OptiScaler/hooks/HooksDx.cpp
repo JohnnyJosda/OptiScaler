@@ -36,6 +36,7 @@ static bool _skipFGSwapChainCreation = false;
 // Swapchain frame counter
 static UINT64 _frameCounter = 0;
 static double _lastFrameTime = 0.0;
+static double _lastFGFrameTime = 0.0;
 static bool _fgPresentCalled = false;
 
 #pragma endregion
@@ -183,6 +184,80 @@ static HRESULT hkEnumAdapterByGpuPreference(IDXGIFactory6* This, UINT Adapter, D
 static HRESULT hkCreateDXGIFactory(REFIID riid, IDXGIFactory** ppFactory);
 static HRESULT hkCreateDXGIFactory1(REFIID riid, IDXGIFactory1** ppFactory);
 static HRESULT hkCreateDXGIFactory2(UINT Flags, REFIID riid, IDXGIFactory2** ppFactory);
+
+static inline D3D11_FILTER UpgradeToAF(D3D11_FILTER f)
+{
+    if (Config::Instance()->AnisotropySkipPointFilter.value_or_default() &&
+        (f == D3D11_FILTER_MIN_MAG_MIP_POINT || f == D3D11_FILTER_COMPARISON_MIN_MAG_MIP_POINT ||
+         f == D3D11_FILTER_MINIMUM_MIN_MAG_MIP_POINT || f == D3D11_FILTER_MAXIMUM_MIN_MAG_MIP_POINT ||
+         f == D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT || f == D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT ||
+         f == D3D11_FILTER_MINIMUM_MIN_MAG_LINEAR_MIP_POINT || f == D3D11_FILTER_MAXIMUM_MIN_MAG_LINEAR_MIP_POINT ||
+         f == D3D11_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT ||
+         f == D3D11_FILTER_COMPARISON_MIN_POINT_MAG_LINEAR_MIP_POINT ||
+         f == D3D11_FILTER_MINIMUM_MIN_POINT_MAG_LINEAR_MIP_POINT ||
+         f == D3D11_FILTER_MAXIMUM_MIN_POINT_MAG_LINEAR_MIP_POINT))
+    {
+        return f;
+    }
+
+    if (f >= D3D11_FILTER_COMPARISON_MIN_MAG_MIP_POINT && f <= D3D11_FILTER_COMPARISON_ANISOTROPIC)
+    {
+        return Config::Instance()->AnisotropyModifyComp.value_or_default() ? D3D11_FILTER_COMPARISON_ANISOTROPIC : f;
+    }
+
+    if (f >= D3D11_FILTER_MINIMUM_MIN_MAG_MIP_POINT && f <= D3D11_FILTER_MINIMUM_ANISOTROPIC)
+    {
+        return Config::Instance()->AnisotropyModifyMinMax.value_or_default() ? D3D11_FILTER_MINIMUM_ANISOTROPIC : f;
+    }
+
+    if (f >= D3D11_FILTER_MAXIMUM_MIN_MAG_MIP_POINT && f <= D3D11_FILTER_MAXIMUM_ANISOTROPIC)
+    {
+        return Config::Instance()->AnisotropyModifyMinMax.value_or_default() ? D3D11_FILTER_MAXIMUM_ANISOTROPIC : f;
+    }
+
+    return D3D11_FILTER_ANISOTROPIC;
+}
+
+static inline D3D12_FILTER UpgradeToAF(D3D12_FILTER f)
+{
+    // Skip point filter
+    const auto minF = D3D12_DECODE_MIN_FILTER(f);
+    const auto magF = D3D12_DECODE_MAG_FILTER(f);
+    const auto mipF = D3D12_DECODE_MIP_FILTER(f);
+    if (Config::Instance()->AnisotropySkipPointFilter.value_or_default() &&
+        ((mipF == D3D12_FILTER_TYPE_POINT) || (minF == D3D12_FILTER_TYPE_POINT && magF == D3D12_FILTER_TYPE_POINT)))
+    {
+        return f;
+    }
+
+    const auto reduction = D3D12_DECODE_FILTER_REDUCTION(f);
+
+    if (reduction == D3D12_FILTER_REDUCTION_TYPE_COMPARISON)
+    {
+        if (Config::Instance()->AnisotropyModifyComp.value_or_default())
+            return D3D12_ENCODE_ANISOTROPIC_FILTER(D3D12_FILTER_REDUCTION_TYPE_COMPARISON);
+
+        return f;
+    }
+
+    if (reduction == D3D12_FILTER_REDUCTION_TYPE_MINIMUM)
+    {
+        if (Config::Instance()->AnisotropyModifyMinMax.value_or_default())
+            return D3D12_ENCODE_ANISOTROPIC_FILTER(D3D12_FILTER_REDUCTION_TYPE_MINIMUM);
+
+        return f;
+    }
+
+    if (reduction == D3D12_FILTER_REDUCTION_TYPE_MAXIMUM)
+    {
+        if (Config::Instance()->AnisotropyModifyMinMax.value_or_default())
+            return D3D12_ENCODE_ANISOTROPIC_FILTER(D3D12_FILTER_REDUCTION_TYPE_MAXIMUM);
+
+        return f;
+    }
+
+    return D3D12_ENCODE_ANISOTROPIC_FILTER(D3D12_FILTER_REDUCTION_TYPE_STANDARD);
+}
 
 static IID streamlineRiid {};
 static bool CheckForRealObject(std::string functionName, IUnknown* pObject, IUnknown** ppRealObject)
@@ -487,10 +562,10 @@ static HRESULT FGPresent(void* This, UINT SyncInterval, UINT Flags, const DXGI_P
 
         auto now = Util::MillisecondsNow();
 
-        if (_lastFrameTime != 0)
-            ftDelta = now - _lastFrameTime;
+        if (_lastFGFrameTime != 0)
+            ftDelta = now - _lastFGFrameTime;
 
-        _lastFrameTime = now;
+        _lastFGFrameTime = now;
         State::Instance().lastFrameTime = ftDelta;
 
         LOG_DEBUG("_frameCounter: {}, flags: {:X}, Frametime: {}", _frameCounter, Flags, ftDelta);
@@ -673,7 +748,7 @@ static HRESULT hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Fla
         _lastFrameTime = now;
         State::Instance().presentFrameTime = ftDelta;
 
-        if (State::Instance().activeFgInput != FGInput::Upscaler)
+        if (o_FGSCPresent == nullptr)
             State::Instance().lastFrameTime = ftDelta;
 
         LOG_DEBUG("SyncInterval: {}, Flags: {:X}, Frametime: {:0.3f} ms", SyncInterval, Flags, ftDelta);
@@ -2664,34 +2739,11 @@ static HRESULT hkD3D12SerializeRootSignature(D3d12Proxy::D3D12_ROOT_SIGNATURE_DE
 
             if (Config::Instance()->AnisotropyOverride.has_value())
             {
-                bool force = false;
+                LOG_DEBUG("Overriding {2:X} to anisotropic filtering {0} -> {1}", samplerDesc->MaxAnisotropy,
+                          Config::Instance()->AnisotropyOverride.value(), (UINT) samplerDesc->Filter);
 
-                if (samplerDesc->Filter >= D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT &&
-                    samplerDesc->Filter <= D3D12_FILTER_COMPARISON_ANISOTROPIC)
-                {
-                    force = true;
-                    samplerDesc->Filter = D3D12_FILTER_COMPARISON_ANISOTROPIC;
-                }
-                else if (samplerDesc->Filter >= D3D12_FILTER_MINIMUM_MIN_MAG_MIP_POINT &&
-                         samplerDesc->Filter <= D3D12_FILTER_MINIMUM_ANISOTROPIC)
-                {
-                    force = true;
-                    samplerDesc->Filter = D3D12_FILTER_MINIMUM_ANISOTROPIC;
-                }
-                else if (samplerDesc->Filter >= D3D12_FILTER_MAXIMUM_MIN_MAG_MIP_POINT &&
-                         samplerDesc->Filter <= D3D12_FILTER_MAXIMUM_ANISOTROPIC)
-                {
-                    force = true;
-                    samplerDesc->Filter = D3D12_FILTER_MAXIMUM_ANISOTROPIC;
-                }
-
-                if (force)
-                {
-                    LOG_DEBUG("Overriding {2:X} to anisotropic filtering {0} -> {1}", samplerDesc->MaxAnisotropy,
-                              Config::Instance()->AnisotropyOverride.value(), (UINT) samplerDesc->Filter);
-
-                    samplerDesc->MaxAnisotropy = Config::Instance()->AnisotropyOverride.value();
-                }
+                samplerDesc->Filter = UpgradeToAF(samplerDesc->Filter);
+                samplerDesc->MaxAnisotropy = Config::Instance()->AnisotropyOverride.value();
             }
         }
     }
@@ -2738,34 +2790,11 @@ static HRESULT hkD3D12SerializeVersionedRootSignature(D3d12Proxy::D3D12_VERSIONE
 
             if (Config::Instance()->AnisotropyOverride.has_value())
             {
-                bool force = false;
+                LOG_DEBUG("Overriding {2:X} to anisotropic filtering {0} -> {1}", samplerDesc->MaxAnisotropy,
+                          Config::Instance()->AnisotropyOverride.value(), (UINT) samplerDesc->Filter);
 
-                if (samplerDesc->Filter >= D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT &&
-                    samplerDesc->Filter <= D3D12_FILTER_COMPARISON_ANISOTROPIC)
-                {
-                    force = true;
-                    samplerDesc->Filter = D3D12_FILTER_COMPARISON_ANISOTROPIC;
-                }
-                else if (samplerDesc->Filter >= D3D12_FILTER_MINIMUM_MIN_MAG_MIP_POINT &&
-                         samplerDesc->Filter <= D3D12_FILTER_MINIMUM_ANISOTROPIC)
-                {
-                    force = true;
-                    samplerDesc->Filter = D3D12_FILTER_MINIMUM_ANISOTROPIC;
-                }
-                else if (samplerDesc->Filter >= D3D12_FILTER_MAXIMUM_MIN_MAG_MIP_POINT &&
-                         samplerDesc->Filter <= D3D12_FILTER_MAXIMUM_ANISOTROPIC)
-                {
-                    force = true;
-                    samplerDesc->Filter = D3D12_FILTER_MAXIMUM_ANISOTROPIC;
-                }
-
-                if (force)
-                {
-                    LOG_DEBUG("Overriding {2:X} to anisotropic filtering {0} -> {1}", samplerDesc->MaxAnisotropy,
-                              Config::Instance()->AnisotropyOverride.value(), (UINT) samplerDesc->Filter);
-
-                    samplerDesc->MaxAnisotropy = Config::Instance()->AnisotropyOverride.value();
-                }
+                samplerDesc->Filter = UpgradeToAF(samplerDesc->Filter);
+                samplerDesc->MaxAnisotropy = Config::Instance()->AnisotropyOverride.value();
             }
         }
     }
@@ -2931,34 +2960,11 @@ static void hkCreateSampler(ID3D12Device* device, const D3D12_SAMPLER_DESC* pDes
 
     if (Config::Instance()->AnisotropyOverride.has_value())
     {
-        bool force = false;
+        LOG_DEBUG("Overriding {2:X} to anisotropic filtering {0} -> {1}", pDesc->MaxAnisotropy,
+                  Config::Instance()->AnisotropyOverride.value(), (UINT) newDesc.Filter);
 
-        if (pDesc->Filter >= D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT &&
-            pDesc->Filter <= D3D12_FILTER_COMPARISON_ANISOTROPIC)
-        {
-            force = true;
-            newDesc.Filter = D3D12_FILTER_COMPARISON_ANISOTROPIC;
-        }
-        else if (pDesc->Filter >= D3D12_FILTER_MINIMUM_MIN_MAG_MIP_POINT &&
-                 pDesc->Filter <= D3D12_FILTER_MINIMUM_ANISOTROPIC)
-        {
-            force = true;
-            newDesc.Filter = D3D12_FILTER_MINIMUM_ANISOTROPIC;
-        }
-        else if (pDesc->Filter >= D3D12_FILTER_MAXIMUM_MIN_MAG_MIP_POINT &&
-                 pDesc->Filter <= D3D12_FILTER_MAXIMUM_ANISOTROPIC)
-        {
-            force = true;
-            newDesc.Filter = D3D12_FILTER_MAXIMUM_ANISOTROPIC;
-        }
-
-        if (force)
-        {
-            LOG_DEBUG("Overriding {2:X} to anisotropic filtering {0} -> {1}", pDesc->MaxAnisotropy,
-                      Config::Instance()->AnisotropyOverride.value(), (UINT) newDesc.Filter);
-
-            newDesc.MaxAnisotropy = Config::Instance()->AnisotropyOverride.value();
-        }
+        newDesc.Filter = UpgradeToAF(pDesc->Filter);
+        newDesc.MaxAnisotropy = Config::Instance()->AnisotropyOverride.value();
     }
     else
     {
@@ -3022,34 +3028,11 @@ static HRESULT hkCreateSamplerState(ID3D11Device* This, const D3D11_SAMPLER_DESC
 
     if (Config::Instance()->AnisotropyOverride.has_value())
     {
-        bool force = false;
+        LOG_DEBUG("Overriding {2:X} to anisotropic filtering {0} -> {1}", pSamplerDesc->MaxAnisotropy,
+                  Config::Instance()->AnisotropyOverride.value(), (UINT) newDesc.Filter);
 
-        if (pSamplerDesc->Filter >= D3D11_FILTER_COMPARISON_MIN_MAG_MIP_POINT &&
-            pSamplerDesc->Filter <= D3D11_FILTER_COMPARISON_ANISOTROPIC)
-        {
-            force = true;
-            newDesc.Filter = D3D11_FILTER_COMPARISON_ANISOTROPIC;
-        }
-        else if (pSamplerDesc->Filter >= D3D11_FILTER_MINIMUM_MIN_MAG_MIP_POINT &&
-                 pSamplerDesc->Filter <= D3D11_FILTER_MINIMUM_ANISOTROPIC)
-        {
-            force = true;
-            newDesc.Filter = D3D11_FILTER_MINIMUM_ANISOTROPIC;
-        }
-        else if (pSamplerDesc->Filter >= D3D11_FILTER_MAXIMUM_MIN_MAG_MIP_POINT &&
-                 pSamplerDesc->Filter <= D3D11_FILTER_MAXIMUM_ANISOTROPIC)
-        {
-            force = true;
-            newDesc.Filter = D3D11_FILTER_MAXIMUM_ANISOTROPIC;
-        }
-
-        if (force)
-        {
-            LOG_DEBUG("Overriding {2:X} to anisotropic filtering {0} -> {1}", pSamplerDesc->MaxAnisotropy,
-                      Config::Instance()->AnisotropyOverride.value(), (UINT) newDesc.Filter);
-
-            newDesc.MaxAnisotropy = Config::Instance()->AnisotropyOverride.value();
-        }
+        newDesc.Filter = UpgradeToAF(pSamplerDesc->Filter);
+        newDesc.MaxAnisotropy = Config::Instance()->AnisotropyOverride.value();
     }
     else
     {

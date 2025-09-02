@@ -110,6 +110,8 @@ bool Sl_Inputs_Dx12::evaluateState(ID3D12Device* device)
     fgConstants.displayWidth = 0;
     fgConstants.displayHeight = 0;
 
+    fgConstants.flags.reset();
+
     // if ()
     //     fgConstants.flags |= FG_Flags::Hdr;
 
@@ -481,6 +483,8 @@ bool Sl_Inputs_Dx12::dispatchFG()
         reinterpret_cast<float*>(&slConstsRef.cameraRight), reinterpret_cast<float*>(&slConstsRef.cameraFwd));
 
     fgOutput->SetReset(slConstsRef.reset == sl::Boolean::eTrue);
+
+    fgOutput->SetFrameTimeDelta(State::Instance().lastFrameTime);
 
     fgOutput->SetInterpolationRect(interpolationWidth, interpolationHeight);
     interpolationWidth = 0;

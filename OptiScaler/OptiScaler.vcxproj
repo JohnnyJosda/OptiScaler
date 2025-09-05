@@ -326,6 +326,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="inputs\FfxApiExe_Dx12.h" />
     <ClInclude Include="inputs\FG\FfxApi_Dx12_FG.h" />
     <ClInclude Include="inputs\FfxApi_Vk.h" />
+    <ClInclude Include="inputs\FG\Upscaler_Inputs_Dx12.h" />
     <ClInclude Include="inputs\NVNGX_DLSS.h" />
     <ClInclude Include="inputs\XeSS_Base.h" />
     <ClInclude Include="inputs\XeSS_Common.h" />
@@ -368,6 +369,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="upscalers\dlss\DLSSFeature_Dx11.h" />
     <ClInclude Include="upscalers\dlss\DLSSFeature_Dx12.h" />
     <ClInclude Include="upscalers\dlss\DLSSFeature_Vk.h" />
+    <ClInclude Include="upscalers\FeatureProvider_Dx12.h" />
     <ClInclude Include="upscalers\fsr31\FSR31Feature.h" />
     <ClInclude Include="upscalers\fsr31\FSR31Feature_Dx11.h" />
     <ClInclude Include="upscalers\fsr31\FSR31Feature_Dx11On12.h" />
@@ -484,6 +486,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClCompile Include="inputs\FfxApiExe_Dx12.cpp" />
     <ClCompile Include="inputs\FG\FfxApi_Dx12_FG.cpp" />
     <ClCompile Include="inputs\FfxApi_Vk.cpp" />
+    <ClCompile Include="inputs\FG\Upscaler_Inputs_Dx12.cpp" />
     <ClCompile Include="inputs\XeSS_Base.cpp" />
     <ClCompile Include="inputs\XeSS_Common.cpp" />
     <ClCompile Include="inputs\XeSS_Dbg.cpp" />
@@ -506,6 +509,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClCompile Include="upscalers\dlss\DLSSFeature_Dx11.cpp" />
     <ClCompile Include="upscalers\dlss\DLSSFeature_Dx12.cpp" />
     <ClCompile Include="upscalers\dlss\DLSSFeature_Vk.cpp" />
+    <ClCompile Include="upscalers\FeatureProvider_Dx12.cpp" />
     <ClCompile Include="upscalers\fsr2_212\FSR2Feature_212.cpp" />
     <ClCompile Include="upscalers\fsr2_212\FSR2Feature_Dx11On12_212.cpp" />
     <ClCompile Include="upscalers\fsr2_212\FSR2Feature_Dx12_212.cpp" />

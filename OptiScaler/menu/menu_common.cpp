@@ -8,7 +8,7 @@
 #include <proxies/XeFG_Proxy.h>
 #include <proxies/FfxApi_Proxy.h>
 
-#include "DLSSG_Mod.h"
+#include <inputs/FG/DLSSG_Mod.h>
 
 #include <framegen/ffx/FSRFG_Dx12.h>
 
@@ -41,7 +41,7 @@ static ImVec2 splashPosition(-1000.0f, -1000.0f);
 static ImVec2 splashSize(0.0f, 0.0f);
 static double splashStart = 0.0;
 static double splashLimit = 0.0;
-static std::vector<std::string> splashText = { "May the coping commence...",
+static std::vector<std::string> splashText = { "Cope smarter, not harder",
                                                "Coping is strong with this one...",
                                                "This is where the fun begins...",
                                                "Got any more of them scalers?...",
@@ -75,10 +75,25 @@ static std::vector<std::string> splashText = { "May the coping commence...",
                                                "Thanks nitec, back to you nitec",
                                                "Tested and approved by By-U",
                                                "0.8 was an inside job",
-                                               "<Your funny text goes here>",
                                                "FSR4 DP4a wenETA, AMD plz",
                                                "OptiCopers, assemble!",
-                                               "The Way It's Meant To Be Upscaled" };
+                                               "The Way It's Meant To Be Upscaled",
+                                               "Your game may not even crash today",
+                                               "Expanded and Enhanced",
+                                               "It's only my 5th crash today",
+                                               "Latency with FG? But I have good internet",
+                                               "Console peasants can't do that",
+                                               "Hope you don't have a good eyesight",
+                                               "Such an aggressive upscaling? A bold move",
+                                               "I almost don't feel the input lag",
+                                               "And that's how you get to 60 FPS",
+                                               "<Your funny text goes here>",
+                                               "Together We Upscale",
+                                               "For upscalers, by upscalers",
+                                               "Opti Sports, it's in the sampling",
+                                               "Render in your world. Upscale in ours",
+                                               "All your pixels are belong to us",
+                                               "Upscaling for the masses, not the classes" };
 
 void MenuCommon::ShowTooltip(const char* tip)
 {
@@ -3052,23 +3067,30 @@ bool MenuCommon::RenderMenu()
                         }
 
                         auto fgOutput = reinterpret_cast<IFGFeature_Dx12*>(State::Instance().currentFG);
-                        if (fgOutput && Config::Instance()->FGXeFGDepthInverted.value_or_default() !=
-                                            fgOutput->IsInvertedDepth() ||
-                            Config::Instance()->FGXeFGJitteredMV.value_or_default() != fgOutput->IsJitteredMVs() ||
-                            Config::Instance()->FGXeFGHighResMV.value_or_default() == fgOutput->IsLowResMV())
+                        const bool restartNeeded =
+                            fgOutput &&
+                            (Config::Instance()->FGXeFGDepthInverted.value_or_default() !=
+                                 fgOutput->IsInvertedDepth() ||
+                             Config::Instance()->FGXeFGJitteredMV.value_or_default() != fgOutput->IsJitteredMVs() ||
+                             Config::Instance()->FGXeFGHighResMV.value_or_default() == fgOutput->IsLowResMV());
+
+                        if (restartNeeded)
                         {
                             ImGui::TextColored(ImVec4(1.f, 0.8f, 0.f, 1.f),
                                                "Restart the game to apply correct XeFG settings");
                         }
+                        else
+                        {
+                            if (!correctMVs)
+                                ImGui::TextColored(ImVec4(1.f, 0.f, 0.f, 1.f),
+                                                   "Requires disabling dilated motion vectors");
 
-                        if (!correctMVs)
-                            ImGui::TextColored(ImVec4(1.f, 0.f, 0.f, 1.f), "Requires disabling dilated motion vectors");
+                            if (State::Instance().SCExclusiveFullscreen)
+                                ImGui::TextColored(ImVec4(1.f, 0.f, 0.f, 1.f), "Borderless display mode required");
 
-                        if (State::Instance().SCExclusiveFullscreen)
-                            ImGui::TextColored(ImVec4(1.f, 0.f, 0.f, 1.f), "Borderless display mode required");
-
-                        if (State::Instance().isHdrActive)
-                            ImGui::TextColored(ImVec4(1.0f, 0.647f, 0.0f, 1.f), "XeFG only supports HDR10");
+                            if (State::Instance().isHdrActive)
+                                ImGui::TextColored(ImVec4(1.0f, 0.647f, 0.0f, 1.f), "XeFG only supports HDR10");
+                        }
 
                         ImGui::BeginDisabled(!correctMVs || State::Instance().SCExclusiveFullscreen);
 

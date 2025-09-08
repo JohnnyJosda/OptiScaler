@@ -7,6 +7,8 @@
 
 #include <framegen/ffx/FSRFG_Dx12.h>
 #include <framegen/xefg/XeFG_Dx12.h>
+
+#include "inputs/FG/FSR3_Dx12_FG.h"
 #include <inputs/FG/FfxApi_Dx12_FG.h>
 
 #include <hudfix/Hudfix_Dx12.h>
@@ -38,6 +40,7 @@ static UINT64 _frameCounter = 0;
 static double _lastFrameTime = 0.0;
 static double _lastFGFrameTime = 0.0;
 static bool _fgPresentCalled = false;
+UINT _lastSwapChainFlags = 0;
 
 #pragma endregion
 
@@ -288,8 +291,6 @@ static bool CheckForRealObject(std::string functionName, IUnknown* pObject, IUnk
 
 static HRESULT hkSetFullscreenState(IDXGISwapChain* This, BOOL Fullscreen, IDXGIOutput* pTarget)
 {
-    State::Instance().realExclusiveFullscreen = Fullscreen;
-
     bool modeChanged = false;
     if (Config::Instance()->FGXeFGForceBorderless.value_or_default())
     {
@@ -314,6 +315,8 @@ static HRESULT hkSetFullscreenState(IDXGISwapChain* This, BOOL Fullscreen, IDXGI
             }
         }
     }
+
+    State::Instance().realExclusiveFullscreen = Fullscreen;
 
     auto result = o_FGSCSetFullscreenState(This, Fullscreen, pTarget);
     LOG_DEBUG("Fullscreen: {}, Result: {:X}", Fullscreen, (UINT) result);
@@ -402,27 +405,34 @@ static HRESULT hkResizeBuffers(IDXGISwapChain* This, UINT BufferCount, UINT Widt
     //    Height = info.height;
     //}
 
-    if (State::Instance().activeFgOutput == FGOutput::XeFG)
+    LOG_DEBUG("BufferCount: {}, Width: {}, Height: {}, NewFormat:{}, SwapChainFlags: {}", BufferCount, Width, Height,
+              (UINT) NewFormat, SwapChainFlags);
+
+    if (Config::Instance()->OverrideVsync.value_or_default() && !State::Instance().SCExclusiveFullscreen)
     {
         DXGI_SWAP_CHAIN_DESC desc {};
         if (This->GetDesc(&desc) == S_OK)
         {
+            LOG_DEBUG("SC BufferCount: {}, Width: {}, Height: {}, NewFormat:{}, SwapChainFlags: {}", desc.BufferCount,
+                      desc.BufferDesc.Width, desc.BufferDesc.Height, (UINT) desc.BufferDesc.Format,
+                      _lastSwapChainFlags);
+
             if (BufferCount == 0)
                 BufferCount = desc.BufferCount;
 
             if (desc.BufferDesc.Width == Width && desc.BufferDesc.Height == Height &&
-                NewFormat == desc.BufferDesc.Format)
+                NewFormat == desc.BufferDesc.Format && _lastSwapChainFlags == SwapChainFlags)
             {
                 LOG_DEBUG("Skipping resize");
                 return S_OK;
             }
         }
+
+        SwapChainFlags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
     }
 
-    if (Config::Instance()->OverrideVsync.value_or_default() && !State::Instance().SCExclusiveFullscreen)
-        SwapChainFlags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-
     State::Instance().SCAllowTearing = (SwapChainFlags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) > 0;
+    _lastSwapChainFlags = SwapChainFlags;
 
     auto result = o_FGSCResizeBuffers(This, BufferCount, Width, Height, NewFormat, SwapChainFlags);
     LOG_DEBUG("Result: {:X}, Caller: {}", (UINT) result, Util::WhoIsTheCaller(_ReturnAddress()));
@@ -493,26 +503,34 @@ static HRESULT hkResizeBuffers1(IDXGISwapChain* This, UINT BufferCount, UINT Wid
     //    Height = info.height;
     //}
 
-    if (State::Instance().activeFgOutput == FGOutput::XeFG)
+    LOG_DEBUG("BufferCount: {}, Width: {}, Height: {}, NewFormat:{}, SwapChainFlags: {}", BufferCount, Width, Height,
+              (UINT) Format, SwapChainFlags);
+
+    if (State::Instance().activeFgOutput == FGOutput::XeFG && !State::Instance().SCExclusiveFullscreen)
     {
         DXGI_SWAP_CHAIN_DESC desc {};
         if (This->GetDesc(&desc) == S_OK)
         {
+            LOG_DEBUG("SC BufferCount: {}, Width: {}, Height: {}, NewFormat:{}, SwapChainFlags: {}", desc.BufferCount,
+                      desc.BufferDesc.Width, desc.BufferDesc.Height, (UINT) desc.BufferDesc.Format,
+                      _lastSwapChainFlags);
+
             if (BufferCount == 0)
                 BufferCount = desc.BufferCount;
 
-            if (desc.BufferDesc.Width == Width && desc.BufferDesc.Height == Height && Format == desc.BufferDesc.Format)
+            if (desc.BufferDesc.Width == Width && desc.BufferDesc.Height == Height &&
+                Format == desc.BufferDesc.Format && _lastSwapChainFlags == SwapChainFlags)
             {
                 LOG_DEBUG("Skipping resize");
                 return S_OK;
             }
         }
+
+        SwapChainFlags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
     }
 
-    if (Config::Instance()->OverrideVsync.value_or_default() && !State::Instance().SCExclusiveFullscreen)
-        SwapChainFlags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-
     State::Instance().SCAllowTearing = (SwapChainFlags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) > 0;
+    _lastSwapChainFlags = SwapChainFlags;
 
     auto result = o_FGSCResizeBuffers1(This, BufferCount, Width, Height, Format, SwapChainFlags, pCreationNodeMask,
                                        ppPresentQueue);
@@ -638,6 +656,8 @@ static HRESULT FGPresent(void* This, UINT SyncInterval, UINT Flags, const DXGI_P
         // FG is disabled. So call it when there is FGFeature
         if (State::Instance().activeFgInput == FGInput::FSRFG)
             ffxPresentCallback();
+        else if (State::Instance().activeFgInput == FGInput::FSRFG30)
+            FSR3FG::ffxPresentCallback();
 
         // And if Optiscalers FG is active call
         // FG Features present
@@ -666,24 +686,32 @@ static HRESULT FGPresent(void* This, UINT SyncInterval, UINT Flags, const DXGI_P
 
     if (willPresent && Config::Instance()->ForceVsync.has_value())
     {
+        LOG_DEBUG("ForceVsync: {}, VsyncInterval: {}, SCAllowTearing: {}, SCExclusiveFullscreen: {}",
+                  Config::Instance()->ForceVsync.value(), Config::Instance()->VsyncInterval.value_or_default(),
+                  State::Instance().SCAllowTearing, State::Instance().SCExclusiveFullscreen);
+
         if (!Config::Instance()->ForceVsync.value())
         {
             SyncInterval = 0;
 
             if (State::Instance().SCAllowTearing && !State::Instance().SCExclusiveFullscreen)
+            {
+                LOG_DEBUG("Adding DXGI_PRESENT_ALLOW_TEARING");
                 Flags |= DXGI_PRESENT_ALLOW_TEARING;
+            }
         }
         else
         {
-            // Remove allow tearing
             SyncInterval = Config::Instance()->VsyncInterval.value_or_default();
 
             if (SyncInterval < 1)
                 SyncInterval = 1;
 
-            if (!State::Instance().SCAllowTearing || State::Instance().SCExclusiveFullscreen)
-                Flags &= ~(DXGI_PRESENT_ALLOW_TEARING);
+            LOG_DEBUG("Removing DXGI_PRESENT_ALLOW_TEARING");
+            Flags &= ~DXGI_PRESENT_ALLOW_TEARING;
         }
+
+        LOG_DEBUG("Final SyncInterval: {}", SyncInterval);
     }
 
     HRESULT result;
@@ -938,12 +966,19 @@ static HRESULT hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Fla
     // Fallback when FGPresent is not hooked for V-sync
     if (willPresent && Config::Instance()->ForceVsync.has_value())
     {
+        LOG_DEBUG("ForceVsync: {}, VsyncInterval: {}, SCAllowTearing: {}, SCExclusiveFullscreen: {}",
+                  Config::Instance()->ForceVsync.value(), Config::Instance()->VsyncInterval.value_or_default(),
+                  State::Instance().SCAllowTearing, State::Instance().SCExclusiveFullscreen);
+
         if (!Config::Instance()->ForceVsync.value())
         {
             SyncInterval = 0;
 
             if (State::Instance().SCAllowTearing && !State::Instance().SCExclusiveFullscreen)
+            {
+                LOG_DEBUG("Adding DXGI_PRESENT_ALLOW_TEARING");
                 Flags |= DXGI_PRESENT_ALLOW_TEARING;
+            }
         }
         else
         {
@@ -953,9 +988,11 @@ static HRESULT hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Fla
             if (SyncInterval < 1)
                 SyncInterval = 1;
 
-            if (!State::Instance().SCAllowTearing || State::Instance().SCExclusiveFullscreen)
-                Flags &= ~(DXGI_PRESENT_ALLOW_TEARING);
+            LOG_DEBUG("Removing DXGI_PRESENT_ALLOW_TEARING");
+            Flags &= ~DXGI_PRESENT_ALLOW_TEARING;
         }
+
+        LOG_DEBUG("Final SyncInterval: {}", SyncInterval);
     }
 
     // DXVK check, it's here because of upscaler time calculations
@@ -1071,8 +1108,8 @@ static HRESULT hkCreateSwapChainForCoreWindow(IDXGIFactory2* pFactory, IUnknown*
         LOG_WARN("Vulkan is creating swapchain!");
 
         if (pDesc != nullptr)
-            LOG_DEBUG("Width: {}, Height: {}, Format: {:X}, Count: {}, SkipWrapping: {}", pDesc->Width, pDesc->Height,
-                      (UINT) pDesc->Format, pDesc->BufferCount, _skipFGSwapChainCreation);
+            LOG_DEBUG("Width: {}, Height: {}, Format: {:X}, Flags: {:X}, Count: {}, SkipWrapping: {}", pDesc->Width,
+                      pDesc->Height, (UINT) pDesc->Format, pDesc->Flags, pDesc->BufferCount, _skipFGSwapChainCreation);
 
         State::Instance().skipDxgiLoadChecks = true;
         auto res = oCreateSwapChainForCoreWindow(pFactory, pDevice, pWindow, pDesc, pRestrictToOutput, ppSwapChain);
@@ -1133,6 +1170,8 @@ static HRESULT hkCreateSwapChainForCoreWindow(IDXGIFactory2* pFactory, IUnknown*
     }
 
     State::Instance().SCAllowTearing = (pDesc->Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) > 0;
+    _lastSwapChainFlags = pDesc->Flags;
+    State::Instance().realExclusiveFullscreen = false;
 
     ID3D12CommandQueue* realQ = nullptr;
     if (!CheckForRealObject(__FUNCTION__, pDevice, (IUnknown**) &realQ))
@@ -1278,11 +1317,9 @@ static HRESULT hkCreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, DXGI
         return res;
     }
 
-    LOG_DEBUG("Width: {}, Height: {}, Format: {:X}, Count: {}, Hwnd: {:X}, Windowed: {}, SkipWrapping: {}",
+    LOG_DEBUG("Width: {}, Height: {}, Format: {:X}, Count: {}, Flags: {:X}, Hwnd: {:X}, Windowed: {}, SkipWrapping: {}",
               pDesc->BufferDesc.Width, pDesc->BufferDesc.Height, (UINT) pDesc->BufferDesc.Format, pDesc->BufferCount,
-              (UINT) pDesc->OutputWindow, pDesc->Windowed, _skipFGSwapChainCreation);
-
-    State::Instance().realExclusiveFullscreen = !pDesc->Windowed;
+              pDesc->Flags, (UINT) pDesc->OutputWindow, pDesc->Windowed, _skipFGSwapChainCreation);
 
     if (State::Instance().activeFgOutput == FGOutput::XeFG &&
         Config::Instance()->FGXeFGForceBorderless.value_or_default())
@@ -1334,6 +1371,8 @@ static HRESULT hkCreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, DXGI
     }
 
     State::Instance().SCAllowTearing = (pDesc->Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) > 0;
+    _lastSwapChainFlags = pDesc->Flags;
+    State::Instance().realExclusiveFullscreen = !pDesc->Windowed;
 
     // Disable FSR FG if amd dll is not found
     if (State::Instance().activeFgOutput == FGOutput::FSRFG && !FfxApiProxy::InitFfxDx12())
@@ -1662,8 +1701,9 @@ static HRESULT hkCreateSwapChainForHwnd(IDXGIFactory* This, IUnknown* pDevice, H
         State::Instance().skipDxgiLoadChecks = false;
     }
 
-    LOG_DEBUG("Width: {}, Height: {}, Format: {:X}, Count: {}, Hwnd: {:X}, SkipWrapping: {}", pDesc->Width,
-              pDesc->Height, (UINT) pDesc->Format, pDesc->BufferCount, (UINT) hWnd, _skipFGSwapChainCreation);
+    LOG_DEBUG("Width: {}, Height: {}, Format: {:X}, Count: {}, Flags: {:X}, Hwnd: {:X}, SkipWrapping: {}", pDesc->Width,
+              pDesc->Height, (UINT) pDesc->Format, pDesc->BufferCount, pDesc->Flags, (UINT) hWnd,
+              _skipFGSwapChainCreation);
 
     if (Config::Instance()->ForceHDR.value_or_default() && !_skipFGSwapChainCreation)
     {
@@ -1716,6 +1756,8 @@ static HRESULT hkCreateSwapChainForHwnd(IDXGIFactory* This, IUnknown* pDevice, H
     }
 
     State::Instance().SCAllowTearing = (pDesc->Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) > 0;
+    _lastSwapChainFlags = pDesc->Flags;
+    State::Instance().realExclusiveFullscreen = pFullscreenDesc != nullptr && !pFullscreenDesc->Windowed;
 
     // Disable FSR FG if amd dll is not found
     if (State::Instance().activeFgOutput == FGOutput::FSRFG && !FfxApiProxy::InitFfxDx12())
@@ -2488,13 +2530,23 @@ static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVE
             pSwapChainDesc->BufferCount = 2;
     }
 
-    if (Config::Instance()->OverrideVsync.value_or_default() && pSwapChainDesc != nullptr)
+    if (pSwapChainDesc != nullptr)
     {
-        pSwapChainDesc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-        pSwapChainDesc->Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+        // For vsync override
+        if (!pSwapChainDesc->Windowed)
+        {
+            LOG_INFO("Game is creating fullscreen swapchain, disabled V-Sync overrides");
+            Config::Instance()->OverrideVsync.set_volatile_value(false);
+        }
 
-        if (pSwapChainDesc->BufferCount < 2)
-            pSwapChainDesc->BufferCount = 2;
+        if (Config::Instance()->OverrideVsync.value_or_default())
+        {
+            pSwapChainDesc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+            pSwapChainDesc->Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+
+            if (pSwapChainDesc->BufferCount < 2)
+                pSwapChainDesc->BufferCount = 2;
+        }
     }
 
     auto result = o_D3D11CreateDeviceAndSwapChain(pAdapter, DriverType, Software, Flags, pFeatureLevels, FeatureLevels,

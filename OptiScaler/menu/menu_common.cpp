@@ -2566,20 +2566,23 @@ bool MenuCommon::RenderMenu()
                 const char* fgInputOptions[] = {
                     "No Frame Generation",
                     "Nukem's DLSSG",
-                    "FSR FG",
+                    "FSR 3.1 FG",
                     "DLSSG via Streamline",
                     "XeFG",
                     "OptiFG (Upscaler)",
+                    "FSR 3.0 FG",
                 };
                 std::vector<std::string> fgInputDesc = {
                     "",
                     "Limited to FSR 3 FG\n\nSupports hudless out of the box\n\nUses streamline swapchain for pacing", 
-                    "Can be used with any FG Output\n\nSupports hudless out of the box\n\nCurrently only FSR3.1 FG is supported", 
+                    "Can be used with any FG Output\n\nSupports hudless out of the box", 
                     "Can be used with any FG Output\n\nSupports hudless out of the box\n\nLimited to games that use Streamline v2", 
                     "Support not implemented", 
                     "Upscaler must be enabled\n\nCan be used with any FG Output, but might be imperfect with some\n\nTo prevent UI glitching, Hudfix required",
+                    "Can be used with any FG Output\n\nSupports hudless out of the box", 
                 };
                 std::vector<uint8_t> disabledMaskInput = { 
+                    false, 
                     false, 
                     false, 
                     false, 
@@ -2779,7 +2782,8 @@ bool MenuCommon::RenderMenu()
                     }
 
                     if (State::Instance().activeFgInput == FGInput::DLSSG ||
-                        State::Instance().activeFgInput == FGInput::FSRFG)
+                        State::Instance().activeFgInput == FGInput::FSRFG ||
+                        State::Instance().activeFgInput == FGInput::FSRFG30)
                     {
                         auto fgOutput = reinterpret_cast<IFGFeature_Dx12*>(State::Instance().currentFG);
                         if (fgOutput)
@@ -2809,18 +2813,13 @@ bool MenuCommon::RenderMenu()
                             if (ImGui::Checkbox("Disable hudless", &disableHudless))
                             {
                                 Config::Instance()->FGDisableHudless = disableHudless;
-
-                                // Prevent FG dispatch from being called for a few frames
-                                // Seems like XeFG doesn't like having hudless suddenly started to be tagged
-                                // and then be required to use it right away
-                                fgOutput->UpdateTarget();
                             }
 
                             ShowHelpMarker("For when the game sends hudless but you want to disable it");
 
                             ImGui::EndDisabled();
 
-                            ImGui::BeginDisabled(!isUsingUIAny || !isUsingHudlessAny);
+                            ImGui::BeginDisabled(!isUsingUIAny /*|| !isUsingHudlessAny*/);
                             if (bool drawUIOverFG = Config::Instance()->FGDrawUIOverFG.value_or_default();
                                 ImGui::Checkbox("Draw UI over FG", &drawUIOverFG))
                                 Config::Instance()->FGDrawUIOverFG = drawUIOverFG;
@@ -3058,15 +3057,15 @@ bool MenuCommon::RenderMenu()
                         if (State::Instance().activeFgInput == FGInput::Upscaler && currentFeature != nullptr)
                             nativeAA = currentFeature->RenderWidth() == currentFeature->DisplayWidth();
 
-                        const bool correctMVs = State::Instance().currentFG->IsLowResMV() || nativeAA;
+                        auto fgOutput = reinterpret_cast<IFGFeature_Dx12*>(State::Instance().currentFG);
+                        const bool correctMVs = fgOutput && fgOutput->IsLowResMV() || nativeAA;
 
-                        if (!correctMVs || State::Instance().SCExclusiveFullscreen)
+                        if (!correctMVs || State::Instance().realExclusiveFullscreen)
                         {
                             Config::Instance()->FGEnabled.reset();
                             Config::Instance()->FGXeFGDebugView.reset();
                         }
 
-                        auto fgOutput = reinterpret_cast<IFGFeature_Dx12*>(State::Instance().currentFG);
                         const bool restartNeeded =
                             fgOutput &&
                             (Config::Instance()->FGXeFGDepthInverted.value_or_default() !=
@@ -3085,14 +3084,14 @@ bool MenuCommon::RenderMenu()
                                 ImGui::TextColored(ImVec4(1.f, 0.f, 0.f, 1.f),
                                                    "Requires disabling dilated motion vectors");
 
-                            if (State::Instance().SCExclusiveFullscreen)
+                            if (State::Instance().realExclusiveFullscreen)
                                 ImGui::TextColored(ImVec4(1.f, 0.f, 0.f, 1.f), "Borderless display mode required");
 
                             if (State::Instance().isHdrActive)
                                 ImGui::TextColored(ImVec4(1.0f, 0.647f, 0.0f, 1.f), "XeFG only supports HDR10");
                         }
 
-                        ImGui::BeginDisabled(!correctMVs || State::Instance().SCExclusiveFullscreen);
+                        ImGui::BeginDisabled(!correctMVs || State::Instance().realExclusiveFullscreen);
 
                         bool fgActive = Config::Instance()->FGEnabled.value_or_default();
                         if (ImGui::Checkbox("Active##3", &fgActive))
@@ -3480,7 +3479,8 @@ bool MenuCommon::RenderMenu()
 
                 // FSR-FG Inputs
                 if (State::Instance().api == DX12 && !State::Instance().isWorkingAsNvngx &&
-                    State::Instance().activeFgInput == FGInput::FSRFG)
+                    (State::Instance().activeFgInput == FGInput::FSRFG ||
+                     State::Instance().activeFgInput == FGInput::FSRFG30))
                 {
                     SeparatorWithHelpMarker("Frame Generation (FSR-FG Inputs)", "Select FSR-FG in-game");
 

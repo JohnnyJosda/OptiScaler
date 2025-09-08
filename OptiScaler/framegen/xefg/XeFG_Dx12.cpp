@@ -128,6 +128,10 @@ bool XeFG_Dx12::DestroySwapchainContext()
 
         if (!State::Instance().isShuttingDown)
             LOG_INFO("Destroy result: {} ({})", magic_enum::enum_name(result), (UINT) result);
+
+        // Set it back because context is not destroyed
+        if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+            _swapChainContext = context;
     }
 
     return true;
@@ -859,12 +863,24 @@ void XeFG_Dx12::SetResource(Dx12Resource* inputResource)
         fResource->validity = FG_ResourceValidity::UntilPresent;
     }
 
+    static auto lastHudlessFrameId = UINT64_MAX;
+
     if (type == FG_ResourceType::UIColor)
         _noUi[fIndex] = false;
     else if (type == FG_ResourceType::Distortion)
         _noDistortionField[fIndex] = false;
     else if (type == FG_ResourceType::HudlessColor)
+    {
         _noHudless[fIndex] = false;
+
+        // HACK: Prevent FG dispatch from being called for a few frames
+        // Seems like XeFG doesn't like having hudless suddenly started to be tagged
+        // and then be required to use it right away
+        if (lastHudlessFrameId == UINT64_MAX || lastHudlessFrameId + 2 < _frameCount)
+            UpdateTarget();
+
+        lastHudlessFrameId = _frameCount;
+    }
 
     fResource->validity = (fResource->validity != FG_ResourceValidity::ValidNow || willFlip)
                               ? FG_ResourceValidity::UntilPresent
@@ -956,8 +972,8 @@ bool XeFG_Dx12::ReleaseSwapchain(HWND hwnd)
     if (_fgContext != nullptr)
         DestroyFGContext();
 
-    // if (_swapChainContext != nullptr)
-    //     DestroySwapchainContext();
+    if (State::Instance().isShuttingDown && _swapChainContext != nullptr)
+        DestroySwapchainContext();
 
     // ReleaseObjects();
 

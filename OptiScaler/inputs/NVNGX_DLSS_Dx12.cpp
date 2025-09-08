@@ -8,6 +8,7 @@
 #include <upscalers/FeatureProvider_Dx12.h>
 
 #include "FG/DLSSG_Mod.h"
+#include "FG/FSR3_Dx12_FG.h"
 #include "FG/Upscaler_Inputs_Dx12.h"
 
 #include "hooks/HooksDx.h"
@@ -404,7 +405,11 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_Shutdown(void)
     // Disabled to prevent crash
     if (State::Instance().currentFG != nullptr && State::Instance().activeFgInput == FGInput::Upscaler)
     {
-        State::Instance().currentFG->Shutdown();
+        if (State::Instance().isShuttingDown)
+            State::Instance().currentFG->Shutdown();
+        else
+            State::Instance().currentFG->DestroyFGContext();
+
         State::Instance().ClearCapturedHudlesses = true;
     }
 
@@ -445,6 +450,9 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_GetParameters(NVSDK_NGX_Parameter
 {
     LOG_FUNC();
 
+    if (OutParameters == nullptr)
+        return NVSDK_NGX_Result_FAIL_InvalidParameter;
+
     if (Config::Instance()->DLSSEnabled.value_or_default() && NVNGXProxy::NVNGXModule() != nullptr &&
         NVNGXProxy::D3D12_GetParameters() != nullptr)
     {
@@ -461,12 +469,16 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_GetParameters(NVSDK_NGX_Parameter
     }
 
     *OutParameters = GetNGXParameters("OptiDx12");
+
     return NVSDK_NGX_Result_Success;
 }
 
 NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_GetCapabilityParameters(NVSDK_NGX_Parameter** OutParameters)
 {
     LOG_FUNC();
+
+    if (OutParameters == nullptr)
+        return NVSDK_NGX_Result_FAIL_InvalidParameter;
 
     if (Config::Instance()->DLSSEnabled.value_or_default() && NVNGXProxy::NVNGXModule() != nullptr &&
         NVNGXProxy::IsDx12Inited() && NVNGXProxy::D3D12_GetCapabilityParameters() != nullptr)
@@ -934,6 +946,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
     }
 
     UpscalerInputsDx12::UpscaleStart(InCmdList, InParameters, deviceContext->feature.get());
+    FSR3FG::SetUpscalerInputs(InCmdList, InParameters, deviceContext->feature.get());
 
     // Record the first timestamp
     if (!State::Instance().isWorkingAsNvngx && HooksDx::queryHeap != nullptr)

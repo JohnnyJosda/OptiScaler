@@ -46,6 +46,7 @@ bool Config::Reload(std::filesystem::path iniPath)
     if (ini.LoadFile(iniPath.c_str()) == SI_OK)
     {
         State::Instance().nvngxIniDetected = exists(iniPath.parent_path() / "nvngx.ini");
+        _log.clear();
 
         // Upscalers
         {
@@ -130,6 +131,9 @@ bool Config::Reload(std::filesystem::path iniPath)
 
             FGDontUseSwapchainBuffers.set_from_config(readBool("OptiFG", "HUDFixDontUseSwapchainBuffers"));
             FGRelaxedResolutionCheck.set_from_config(readBool("OptiFG", "HUDFixRelaxedResolutionCheck"));
+
+            FGResourceFlip.set_from_config(readBool("OptiFG", "ResourceFlip"));
+            FGResourceFlipOffset.set_from_config(readBool("OptiFG", "ResourceFlipOffset"));
         }
 
         {
@@ -329,6 +333,8 @@ bool Config::Reload(std::filesystem::path iniPath)
                 FpsScale.set_from_config(std::clamp(setting.value(), 0.5f, 2.0f));
 
             TTFFontPath.set_from_config(readWString("Menu", "TTFFontPath"));
+
+            FGShortcutKey.set_from_config(readInt("Menu", "FGShortcutKey"));
         }
 
         // Hooks
@@ -708,6 +714,9 @@ bool Config::SaveIni()
                      GetBoolValue(Instance()->FGDontUseSwapchainBuffers.value_for_config()).c_str());
         ini.SetValue("OptiFG", "HUDFixRelaxedResolutionCheck",
                      GetBoolValue(Instance()->FGRelaxedResolutionCheck.value_for_config()).c_str());
+        ini.SetValue("OptiFG", "ResourceFlip", GetBoolValue(Instance()->FGResourceFlip.value_for_config()).c_str());
+        ini.SetValue("OptiFG", "ResourceFlipOffset",
+                     GetBoolValue(Instance()->FGResourceFlipOffset.value_for_config()).c_str());
     }
 
     // Framerate
@@ -828,6 +837,10 @@ bool Config::SaveIni()
         ini.SetValue("Menu", "ShowFps", GetBoolValue(Instance()->ShowFps.value_for_config()).c_str());
         ini.SetValue("Menu", "UseHQFont", GetBoolValue(Instance()->UseHQFont.value_for_config()).c_str());
         ini.SetValue("Menu", "DisableSplash", GetBoolValue(Instance()->DisableSplash.value_for_config()).c_str());
+
+        setting = Instance()->FGShortcutKey.value_for_config();
+        ini.SetValue("Menu", "FGShortcutKey",
+                     GetIntValue(Instance()->FGShortcutKey.value_for_config(), setting > 0).c_str());
 
         setting = Instance()->FpsShortcutKey.value_for_config();
         ini.SetValue("Menu", "FpsShortcutKey",
@@ -1189,6 +1202,8 @@ void Config::CheckUpscalerFiles()
     }
 }
 
+std::vector<std::string> Config::GetConfigLog() { return _log; }
+
 std::optional<std::string> Config::readString(std::string section, std::string key, bool lowercase)
 {
     std::string value = ini.GetValue(section.c_str(), key.c_str(), "auto");
@@ -1198,6 +1213,8 @@ std::optional<std::string> Config::readString(std::string section, std::string k
 
     if (lower == "auto")
         return std::nullopt;
+
+    _log.push_back(std::format("{}.{}: {}", section, key, value));
 
     return lowercase ? lower : value;
 }
@@ -1211,6 +1228,8 @@ std::optional<std::wstring> Config::readWString(std::string section, std::string
 
     if (lower == "auto")
         return std::nullopt;
+
+    _log.push_back(std::format("{}.{}: {}", section, key, value));
 
     return lowercase ? string_to_wstring(lower) : string_to_wstring(value);
 }
@@ -1330,13 +1349,9 @@ std::optional<bool> Config::readBool(std::string section, std::string key)
 {
     auto value = readString(section, key, true);
     if (value == "true")
-    {
         return true;
-    }
     else if (value == "false")
-    {
         return false;
-    }
 
     return std::nullopt;
 }

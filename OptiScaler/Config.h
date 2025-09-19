@@ -243,6 +243,7 @@ class Config
     CustomOptional<bool> UseHQFont { true };
     CustomOptional<bool> DisableSplash { false };
     CustomOptional<std::wstring, NoDefault> TTFFontPath;
+    CustomOptional<int> FGShortcutKey { VK_END };
 
     // Hooks
     CustomOptional<bool> HookOriginalNvngxOnly { false };
@@ -466,10 +467,13 @@ class Config
 
     void CheckUpscalerFiles();
 
+    std::vector<std::string> GetConfigLog();
+
     static Config* Instance();
 
   private:
     inline static Config* _config;
+    inline static std::vector<std::string> _log;
 
     CSimpleIniA ini;
     CSimpleIniA fakenvapiIni;

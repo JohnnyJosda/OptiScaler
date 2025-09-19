@@ -677,8 +677,6 @@ static void CheckWorkingMode()
                 {
                     LOG_DEBUG("dxgi.dll already in memory");
 
-                    CheckForGPU();
-
                     DxgiProxy::Init(dxgiModule);
 
                     if (Config::Instance()->DxgiSpoofing.value_or_default())
@@ -691,8 +689,6 @@ static void CheckWorkingMode()
             else
             {
                 LOG_DEBUG("dxgi.dll already in memory");
-
-                CheckForGPU();
 
                 if (Config::Instance()->DxgiSpoofing.value_or_default())
                     HookDxgiForSpoofing();
@@ -1157,6 +1153,14 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
         spdlog::info("");
 
+        spdlog::info("Config parameters:");
+        for (const std::string& l : Config::Instance()->GetConfigLog())
+            spdlog::info(l);
+
+        // Initial state of FG
+        State::Instance().activeFgInput = Config::Instance()->FGInput.value_or_default();
+        State::Instance().activeFgOutput = Config::Instance()->FGOutput.value_or_default();
+
         // Init Kernel proxies
         NtdllProxy::Init();
         KernelBaseProxy::Init();
@@ -1203,10 +1207,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
         if (Config::Instance()->DisableOverlays.value_or_default())
             SetEnvironmentVariable(L"SteamNoOverlayUIDrawing", L"1");
-
-        // Initial state of FG
-        State::Instance().activeFgInput = Config::Instance()->FGInput.value_or_default();
-        State::Instance().activeFgOutput = Config::Instance()->FGOutput.value_or_default();
 
         // Hook FSR4 stuff as early as possible
         spdlog::info("");
@@ -1277,7 +1277,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         // HookFfxExeInputs();
 
         if (State::Instance().activeFgInput == FGInput::FSRFG30)
+        {
+            FSR3FG::HookFSR3FGInputs();
             FSR3FG::HookFSR3FGExeInputs();
+        }
 
         for (size_t i = 0; i < 300; i++)
         {

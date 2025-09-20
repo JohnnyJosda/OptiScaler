@@ -42,8 +42,8 @@ static double _lastFGFrameTime = 0.0;
 static bool _fgPresentCalled = false;
 UINT _lastSwapChainFlags = 0;
 UINT _lastPresentFlags = 0;
-bool _skipPresent1 = false;
-bool _skipResize1 = false;
+bool _skipPresent = false;
+bool _skipResize = false;
 
 #pragma endregion
 
@@ -396,6 +396,13 @@ static HRESULT hkGetFullscreenState(IDXGISwapChain* This, BOOL* pFullscreen, IDX
 static HRESULT hkResizeBuffers(IDXGISwapChain* This, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat,
                                UINT SwapChainFlags)
 {
+    // Skip XeFG's internal call
+    if (_skipResize)
+    {
+        LOG_DEBUG("XeFG call skipping");
+        return o_FGSCResizeBuffers(This, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+    }
+
     LOG_DEBUG("BufferCount: {}, Width: {}, Height: {}, NewFormat:{}, SwapChainFlags: {}", BufferCount, Width, Height,
               (UINT) NewFormat, SwapChainFlags);
 
@@ -433,11 +440,11 @@ static HRESULT hkResizeBuffers(IDXGISwapChain* This, UINT BufferCount, UINT Widt
         fg->Deactivate();
     }
 
-    _skipResize1 = true;
+    _skipResize = true;
     State::Instance().skipSpoofing = true;
     auto result = o_FGSCResizeBuffers(This, BufferCount, Width, Height, NewFormat, SwapChainFlags);
     State::Instance().skipSpoofing = false;
-    _skipResize1 = false;
+    _skipResize = false;
     LOG_DEBUG("Result: {:X}, Caller: {}", (UINT) result, Util::WhoIsTheCaller(_ReturnAddress()));
 
     if (result == S_OK)
@@ -493,7 +500,7 @@ static HRESULT hkResizeBuffers1(IDXGISwapChain* This, UINT BufferCount, UINT Wid
                                 UINT SwapChainFlags, const UINT* pCreationNodeMask, IUnknown* const* ppPresentQueue)
 {
     // Skip XeFG's internal call
-    if (_skipResize1)
+    if (_skipResize)
     {
         LOG_DEBUG("XeFG call skipping");
         return o_FGSCResizeBuffers1(This, BufferCount, Width, Height, Format, SwapChainFlags, pCreationNodeMask,
@@ -538,8 +545,12 @@ static HRESULT hkResizeBuffers1(IDXGISwapChain* This, UINT BufferCount, UINT Wid
     }
 
     State::Instance().skipSpoofing = true;
+    _skipResize = true;
+
     auto result = o_FGSCResizeBuffers1(This, BufferCount, Width, Height, Format, SwapChainFlags, pCreationNodeMask,
                                        ppPresentQueue);
+
+    _skipResize = false;
     State::Instance().skipSpoofing = false;
 
     LOG_DEBUG("Result: {:X}, Caller: {}", (UINT) result, Util::WhoIsTheCaller(_ReturnAddress()));
@@ -745,11 +756,18 @@ static HRESULT FGPresent(void* This, UINT SyncInterval, UINT Flags, const DXGI_P
 
 static HRESULT hkFGPresent(void* This, UINT SyncInterval, UINT Flags)
 {
+    // Skip XeFG's internal call
+    if (_skipPresent)
+    {
+        LOG_DEBUG("XeFG call skipping");
+        return o_FGSCPresent(This, SyncInterval, Flags);
+    }
+
     LOG_DEBUG("SyncInterval: {}, Flags: {:X}", SyncInterval, Flags);
 
-    _skipPresent1 = true;
+    _skipPresent = true;
     auto result = FGPresent(This, SyncInterval, Flags, nullptr);
-    _skipPresent1 = false;
+    _skipPresent = false;
 
     return result;
 }
@@ -758,14 +776,18 @@ static HRESULT hkFGPresent1(void* This, UINT SyncInterval, UINT Flags,
                             const DXGI_PRESENT_PARAMETERS* pPresentParameters)
 {
     // Skip XeFG's internal call
-    if (_skipPresent1)
+    if (_skipPresent)
     {
         LOG_DEBUG("XeFG call skipping");
         return o_FGSCPresent1(This, SyncInterval, Flags, pPresentParameters);
     }
 
     LOG_DEBUG("SyncInterval: {}, Flags: {:X}", SyncInterval, Flags);
-    return FGPresent(This, SyncInterval, Flags, pPresentParameters);
+    _skipPresent = true;
+    auto result = FGPresent(This, SyncInterval, Flags, pPresentParameters);
+    _skipPresent = false;
+
+    return result;
 }
 
 static HRESULT hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags,
@@ -1042,6 +1064,7 @@ static HRESULT hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Fla
         // Draw overlay
         MenuOverlayDx::Present(pSwapChain, SyncInterval, Flags, pPresentParameters, pDevice, hWnd, isUWP);
 
+        LOG_DEBUG("Calling fakenvapi");
         if (State::Instance().activeFgOutput == FGOutput::FSRFG)
         {
             fakenvapi::reportFGPresent(pSwapChain, fg != nullptr && fg->IsActive(), _frameCounter % 2);
@@ -1054,11 +1077,15 @@ static HRESULT hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Fla
         _frameCounter++;
     }
 
+    LOG_DEBUG("Calling original present");
+
     // swapchain present
     if (pPresentParameters == nullptr)
         presentResult = pSwapChain->Present(SyncInterval, Flags);
     else
         presentResult = ((IDXGISwapChain1*) pSwapChain)->Present1(SyncInterval, Flags, pPresentParameters);
+
+    LOG_DEBUG("Original present result: {:X}", (UINT) presentResult);
 
     // release used objects
     if (cq != nullptr)
@@ -1458,19 +1485,25 @@ static HRESULT hkCreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, DXGI
                 void** pFactoryVTable = *reinterpret_cast<void***>(*ppSwapChain);
 
                 o_FGSCPresent = (PFN_Present) pFactoryVTable[8];
-                o_FGSCPresent1 = (PFN_Present1) pFactoryVTable[22];
-
-                // Borderless hooks
                 o_FGSCSetFullscreenState = (PFN_SetFullscreenState) pFactoryVTable[10];
                 o_FGSCGetFullscreenState = (PFN_GetFullscreenState) pFactoryVTable[11];
                 o_FGSCResizeBuffers = (PFN_ResizeBuffers) pFactoryVTable[13];
                 o_FGSCResizeTarget = (PFN_ResizeTarget) pFactoryVTable[14];
                 o_FGSCGetFullscreenDesc = (PFN_GetFullscreenDesc) pFactoryVTable[19];
+                o_FGSCPresent1 = (PFN_Present1) pFactoryVTable[22];
                 o_FGSCResizeBuffers1 = (PFN_ResizeBuffers1) pFactoryVTable[39];
 
                 if (o_FGSCPresent != nullptr)
                 {
                     LOG_INFO("Hooking FG SwapChain present");
+                    LOG_TRACE("FGSCPresent: {:X}", (size_t) o_FGSCPresent);
+                    LOG_TRACE("FGSCSetFullscreenState: {:X}", (size_t) o_FGSCSetFullscreenState);
+                    LOG_TRACE("FGSCGetFullscreenState: {:X}", (size_t) o_FGSCGetFullscreenState);
+                    LOG_TRACE("FGSCResizeBuffers: {:X}", (size_t) o_FGSCResizeBuffers);
+                    LOG_TRACE("FGSCResizeTarget: {:X}", (size_t) o_FGSCResizeTarget);
+                    LOG_TRACE("FGSCGetFullscreenDesc: {:X}", (size_t) o_FGSCGetFullscreenDesc);
+                    LOG_TRACE("FGSCPresent1: {:X}", (size_t) o_FGSCPresent1);
+                    LOG_TRACE("FGSCResizeBuffers1: {:X}", (size_t) o_FGSCResizeBuffers1);
 
                     DetourTransactionBegin();
                     DetourUpdateThread(GetCurrentThread());
@@ -1712,7 +1745,7 @@ static HRESULT hkCreateSwapChainForHwnd(IDXGIFactory* This, IUnknown* pDevice, H
     }
 
     LOG_DEBUG("Width: {}, Height: {}, Format: {:X}, Count: {}, Flags: {:X}, Hwnd: {:X}, SkipWrapping: {}", pDesc->Width,
-              pDesc->Height, (UINT) pDesc->Format, pDesc->BufferCount, pDesc->Flags, (UINT) hWnd,
+              pDesc->Height, (UINT) pDesc->Format, pDesc->BufferCount, pDesc->Flags, (size_t) hWnd,
               _skipFGSwapChainCreation);
 
     if (Config::Instance()->ForceHDR.value_or_default() && !_skipFGSwapChainCreation)
@@ -1838,18 +1871,25 @@ static HRESULT hkCreateSwapChainForHwnd(IDXGIFactory* This, IUnknown* pDevice, H
                 void** pFactoryVTable = *reinterpret_cast<void***>(*ppSwapChain);
 
                 o_FGSCPresent = (PFN_Present) pFactoryVTable[8];
-                o_FGSCPresent1 = (PFN_Present1) pFactoryVTable[22];
-
-                // Borderless hooks
                 o_FGSCSetFullscreenState = (PFN_SetFullscreenState) pFactoryVTable[10];
                 o_FGSCGetFullscreenState = (PFN_GetFullscreenState) pFactoryVTable[11];
                 o_FGSCResizeBuffers = (PFN_ResizeBuffers) pFactoryVTable[13];
+                o_FGSCResizeTarget = (PFN_ResizeTarget) pFactoryVTable[14];
                 o_FGSCGetFullscreenDesc = (PFN_GetFullscreenDesc) pFactoryVTable[19];
+                o_FGSCPresent1 = (PFN_Present1) pFactoryVTable[22];
                 o_FGSCResizeBuffers1 = (PFN_ResizeBuffers1) pFactoryVTable[39];
 
                 if (o_FGSCPresent != nullptr)
                 {
                     LOG_INFO("Hooking FG SwapChain present");
+                    LOG_TRACE("FGSCPresent: {:X}", (size_t) o_FGSCPresent);
+                    LOG_TRACE("FGSCSetFullscreenState: {:X}", (size_t) o_FGSCSetFullscreenState);
+                    LOG_TRACE("FGSCGetFullscreenState: {:X}", (size_t) o_FGSCGetFullscreenState);
+                    LOG_TRACE("FGSCResizeBuffers: {:X}", (size_t) o_FGSCResizeBuffers);
+                    LOG_TRACE("FGSCResizeTarget: {:X}", (size_t) o_FGSCResizeTarget);
+                    LOG_TRACE("FGSCGetFullscreenDesc: {:X}", (size_t) o_FGSCGetFullscreenDesc);
+                    LOG_TRACE("FGSCPresent1: {:X}", (size_t) o_FGSCPresent1);
+                    LOG_TRACE("FGSCResizeBuffers1: {:X}", (size_t) o_FGSCResizeBuffers1);
 
                     DetourTransactionBegin();
                     DetourUpdateThread(GetCurrentThread());

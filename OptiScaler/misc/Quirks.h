@@ -36,6 +36,7 @@ enum class GameQuirk : uint64_t
     NoFSRFGFirstSwapchain,
     FixSlSimulationMarkers,
     HitmanReflexHacks,
+    SkipD3D11FeatureLevelElevation,
     // Don't forget to add the new entry to printQuirks
     _
 };
@@ -199,11 +200,19 @@ static const QuirkEntry quirkTable[] = {
     // SL spoof enough to unlock everything DLSS
     QUIRK_ENTRY("darktide.exe", GameQuirk::DisableDxgiSpoofing),
 
+    // Dying Light 2 Stay Human, Dying Light: The Beast
+    // SL spoof enough to unlock everything DLSS
+    QUIRK_ENTRY("dyinglightgame_x64_rwdi.exe", GameQuirk::DisableDxgiSpoofing),
+    QUIRK_ENTRY("dyinglightgame_thebeast_x64_rwdi.exe", GameQuirk::DisableDxgiSpoofing),
+
     // SL spoof enough to unlock everything DLSS
     QUIRK_ENTRY("cyberpunk2077.exe", GameQuirk::CyberpunkHudlessStateOverride, GameQuirk::DisableHudfix,
                 GameQuirk::DisableDxgiSpoofing),
     QUIRK_ENTRY("witcher3.exe", GameQuirk::DisableDxgiSpoofing),
     QUIRK_ENTRY("alanwake2.exe", GameQuirk::DisableDxgiSpoofing),
+
+    // Final Fantasy XIV
+    QUIRK_ENTRY("graphadapterdesc.exe", GameQuirk::SkipD3D11FeatureLevelElevation),
 
     // Self-explanatory
     QUIRK_ENTRY("persistence-win64-shipping.exe", GameQuirk::ForceUnrealEngine),
@@ -214,6 +223,7 @@ static const QuirkEntry quirkTable[] = {
     QUIRK_ENTRY("gwt.exe", GameQuirk::ForceUnrealEngine),
     QUIRK_ENTRY("roadcraft - retail.exe", GameQuirk::FixSlSimulationMarkers),
     QUIRK_ENTRY("observersystemredux.exe", GameQuirk::DisableDxgiSpoofing, GameQuirk::ForceAutoExposure),
+    QUIRK_ENTRY("sackboy-win64-shipping.exe", GameQuirk::DisableDxgiSpoofing, GameQuirk::ForceAutoExposure),
 
     // VULKAN
     // ------
@@ -298,6 +308,8 @@ static void printQuirks(flag_set<GameQuirk>& quirks)
         spdlog::info("Quirk: Don't use V-Sync overrides");
     if (quirks & GameQuirk::HitmanReflexHacks)
         spdlog::info("Quirk: Hack for broken Hitman reflex");
+    if (quirks & GameQuirk::SkipD3D11FeatureLevelElevation)
+        spdlog::info("Quirk: Skipping D3D11 feature level elevation, native FSR3.1 will be disabled!");
 
     return;
 }

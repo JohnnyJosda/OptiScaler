@@ -440,6 +440,7 @@ bool Config::Reload(std::filesystem::path iniPath)
 
         // Hotfixes
         {
+            CheckForUpdate.set_from_config(readBool("Hotfix", "CheckForUpdate"));
             DisableOverlays.set_from_config(readBool("Hotfix", "DisableOverlays"));
 
             RoundInternalResolution.set_from_config(readInt("Hotfix", "RoundInternalResolution"));
@@ -948,6 +949,9 @@ bool Config::SaveIni()
 
     // Hotfixes
     {
+        ini.SetValue("Hotfix", "CheckForUpdate",
+                     Instance()->CheckForUpdate.has_value() ? (Instance()->CheckForUpdate.value() ? "true" : "false")
+                                                            : "auto");
         ini.SetValue("Hotfix", "DisableOverlays",
                      Instance()->DisableOverlays.has_value() ? (Instance()->DisableOverlays.value() ? "true" : "false")
                                                              : "auto");

@@ -48,7 +48,7 @@ class IFGFeature_Dx12 : public virtual IFGFeature
 
     ID3D12GraphicsCommandList* _uiCommandList[BUFFER_COUNT] {};
     ID3D12CommandAllocator* _uiCommandAllocator[BUFFER_COUNT] {};
-    bool _uiCommandListResetted[BUFFER_COUNT] {};
+    bool _uiCommandListResetted[BUFFER_COUNT] { false, false, false, false };
 
     std::unordered_map<FG_ResourceType, Dx12Resource> _frameResources[BUFFER_COUNT] {};
     std::unordered_map<FG_ResourceType, ID3D12Resource*> _resourceCopy[BUFFER_COUNT] {};
@@ -90,7 +90,8 @@ class IFGFeature_Dx12 : public virtual IFGFeature
 
     virtual void SetResource(Dx12Resource* inputResource) = 0;
     virtual void SetCommandQueue(FG_ResourceType type, ID3D12CommandQueue* queue) = 0;
-    virtual ID3D12GraphicsCommandList* GetUICommandList(int index = -1) = 0;
+
+    ID3D12GraphicsCommandList* GetUICommandList(int index = -1);
 
     Dx12Resource* GetResource(FG_ResourceType type, int index = -1);
     bool GetResourceCopy(FG_ResourceType type, D3D12_RESOURCE_STATES bufferState, ID3D12Resource* output);

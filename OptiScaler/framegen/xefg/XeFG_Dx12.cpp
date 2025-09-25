@@ -538,9 +538,9 @@ bool XeFG_Dx12::Dispatch()
     constData.motionVectorScaleX = _mvScaleX[fIndex];
     constData.motionVectorScaleY = _mvScaleY[fIndex];
     constData.resetHistory = _reset[fIndex];
-    constData.frameRenderTime = _ftDelta[fIndex];
+    constData.frameRenderTime = State::Instance().lastFGFrameTime;
 
-    LOG_DEBUG("Reset: {}, FTDelta: {}", _reset[fIndex], _ftDelta[fIndex]);
+    LOG_DEBUG("Reset: {}, FTDelta: {}", _reset[fIndex], constData.frameRenderTime);
 
     auto result = XeFGProxy::TagFrameConstants()(_swapChainContext, _willDispatchFrame, &constData);
     if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
@@ -649,6 +649,7 @@ void XeFG_Dx12::EvaluateState(ID3D12Device* device, FG_Constants& fgConstants)
         // If there is a change deactivate it
         else if (State::Instance().FGchanged)
         {
+            LOG_DEBUG("FGChanged");
             Deactivate();
 
             // Pause for 10 frames
@@ -664,6 +665,7 @@ void XeFG_Dx12::EvaluateState(ID3D12Device* device, FG_Constants& fgConstants)
     }
     else
     {
+        LOG_DEBUG("!FGEnabled");
         Deactivate();
 
         State::Instance().ClearCapturedHudlesses = true;
@@ -771,14 +773,13 @@ bool XeFG_Dx12::Present()
     auto fIndex = GetIndex();
     if (_uiCommandListResetted[fIndex])
     {
-
-        LOG_DEBUG("Executing _uiCommandList[fIndex][{}]: {:X}", fIndex, (size_t) _uiCommandList[fIndex]);
+        LOG_DEBUG("Executing _uiCommandList[{}]: {:X}", fIndex, (size_t) _uiCommandList[fIndex]);
         auto closeResult = _uiCommandList[fIndex]->Close();
 
         if (closeResult == S_OK)
             _gameCommandQueue->ExecuteCommandLists(1, (ID3D12CommandList**) &_uiCommandList[fIndex]);
         else
-            LOG_ERROR("_uiCommandList[{}]->Close() error", fIndex, (UINT) closeResult);
+            LOG_ERROR("_uiCommandList[{}]->Close() error: {:X}", fIndex, (UINT) closeResult);
 
         _uiCommandListResetted[fIndex] = false;
     }
@@ -951,61 +952,6 @@ void XeFG_Dx12::SetResource(Dx12Resource* inputResource)
 void XeFG_Dx12::SetResourceReady(FG_ResourceType type) { _resourceReady[GetIndex()][type] = true; }
 
 void XeFG_Dx12::SetCommandQueue(FG_ResourceType type, ID3D12CommandQueue* queue) { _gameCommandQueue = queue; }
-
-ID3D12GraphicsCommandList* XeFG_Dx12::GetUICommandList(int index)
-{
-    if (index < 0)
-        index = GetIndex();
-
-    LOG_DEBUG("index: {}", index);
-
-    if (_uiCommandAllocator[0] == nullptr)
-    {
-        if (_device != nullptr)
-            CreateObjects(_device);
-        else if (State::Instance().currentD3D12Device != nullptr)
-            CreateObjects(State::Instance().currentD3D12Device);
-        else
-            return nullptr;
-    }
-
-    for (size_t i = 0; i < BUFFER_COUNT; i++)
-    {
-        if (i != index && _uiCommandListResetted[i])
-        {
-            LOG_DEBUG("Executing _uiCommandList[{}]: {:X}", i, (size_t) _uiCommandList[i]);
-            auto closeResult = _uiCommandList[i]->Close();
-
-            if (closeResult == S_OK)
-                _gameCommandQueue->ExecuteCommandLists(1, (ID3D12CommandList**) &_uiCommandList[i]);
-            else
-                LOG_ERROR("_uiCommandList[{}]->Close() error: {:X}", i, (UINT) closeResult);
-
-            _uiCommandListResetted[i] = false;
-        }
-    }
-
-    if (!_uiCommandListResetted[index])
-    {
-        _uiCommandListResetted[index] = true;
-
-        auto result = _uiCommandAllocator[index]->Reset();
-
-        if (result == S_OK)
-        {
-            result = _uiCommandList[index]->Reset(_uiCommandAllocator[index], nullptr);
-
-            if (result != S_OK)
-                LOG_ERROR("_uiCommandList[{}]->Reset() error: {:X}", index, (UINT) result);
-        }
-        else
-        {
-            LOG_ERROR("_uiCommandAllocator[{}]->Reset() error: {:X}", index, (UINT) result);
-        }
-    }
-
-    return _uiCommandList[index];
-}
 
 bool XeFG_Dx12::ReleaseSwapchain(HWND hwnd)
 {

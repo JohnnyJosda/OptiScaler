@@ -55,8 +55,9 @@ struct QuirkEntry
 // exeName has to be lowercase
 static const QuirkEntry quirkTable[] = {
     // Red Dead Redemption
-    QUIRK_ENTRY("rdr.exe", GameQuirk::SkipFsr3Method, GameQuirk::NoFSRFGFirstSwapchain),
-    QUIRK_ENTRY("playrdr.exe", GameQuirk::SkipFsr3Method, GameQuirk::NoFSRFGFirstSwapchain),
+    QUIRK_ENTRY("rdr.exe", GameQuirk::SkipFsr3Method, GameQuirk::NoFSRFGFirstSwapchain, GameQuirk::DisableDxgiSpoofing),
+    QUIRK_ENTRY("playrdr.exe", GameQuirk::SkipFsr3Method, GameQuirk::NoFSRFGFirstSwapchain,
+                GameQuirk::DisableDxgiSpoofing),
 
     // No Man's Sky
     QUIRK_ENTRY("nms.exe", GameQuirk::KernelBaseHooks, GameQuirk::VulkanDLSSBarrierFixup),
@@ -226,6 +227,7 @@ static const QuirkEntry quirkTable[] = {
     QUIRK_ENTRY("sackboy-win64-shipping.exe", GameQuirk::DisableDxgiSpoofing, GameQuirk::ForceAutoExposure),
     QUIRK_ENTRY("hellbladegame-win64-shipping.exe", GameQuirk::DisableDxgiSpoofing),
     QUIRK_ENTRY("pumpkinjack-win64-shipping.exe", GameQuirk::DisableDxgiSpoofing, GameQuirk::ForceAutoExposure),
+    QUIRK_ENTRY("metroexodus.exe", GameQuirk::DisableDxgiSpoofing, GameQuirk::ForceAutoExposure),
 
     // VULKAN
     // ------

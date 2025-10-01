@@ -363,7 +363,11 @@ struct AmdExtFfxQuery : public IAmdExtFfxQuery
     ULONG __stdcall Release(void) override
     {
         if (o_amdExtFfxQuery)
-            return o_amdExtFfxQuery->Release();
+        {
+            auto result = o_amdExtFfxQuery->Release();
+            o_amdExtFfxQuery = nullptr;
+            return result;
+        }
 
         return 0;
     }

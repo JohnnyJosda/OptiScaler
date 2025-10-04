@@ -7,9 +7,6 @@
 #include <dx12/ffx_api_dx12.h>
 #include <ffx_framegeneration.h>
 
-#include <magic_enum.hpp>
-#include <magic_enum_utility.hpp>
-
 class FSRFG_Dx12 : public virtual IFGFeature_Dx12
 {
   private:
@@ -91,6 +88,7 @@ class FSRFG_Dx12 : public virtual IFGFeature_Dx12
     void SetCommandQueue(FG_ResourceType type, ID3D12CommandQueue* queue) override final;
 
     ffxReturnCode_t DispatchCallback(ffxDispatchDescFrameGeneration* params);
+
     FSRFG_Dx12() : IFGFeature_Dx12(), IFGFeature()
     {
         //

@@ -21,21 +21,23 @@
 bool CheckForFGStatus()
 {
     // Need to check overlay menu parameter, goes to places it shouldn't go
-    if (!Config::Instance()->OverlayMenu.value_or_default())
-        return false;
+    // if (!Config::Instance()->OverlayMenu.value_or_default())
+    //    return false;
 
     // Disable FG if amd dll is not found
     if (State::Instance().activeFgOutput == FGOutput::FSRFG)
     {
         FfxApiProxy::InitFfxDx12();
-        if (FfxApiProxy::IsFGReady())
+        if (!FfxApiProxy::IsFGReady())
         {
+            LOG_DEBUG("Can't init FfxApiProxy, disabling FGOutput");
             Config::Instance()->FGOutput.set_volatile_value(FGOutput::NoFG);
             State::Instance().activeFgOutput = Config::Instance()->FGOutput.value_or_default();
         }
     }
     else if (State::Instance().activeFgOutput == FGOutput::XeFG && !XeFGProxy::InitXeFG())
     {
+        LOG_DEBUG("Can't init XeFGProxy, disabling FGOutput");
         Config::Instance()->FGOutput.set_volatile_value(FGOutput::NoFG);
         State::Instance().activeFgOutput = Config::Instance()->FGOutput.value_or_default();
     }
@@ -582,8 +584,7 @@ HRESULT FGHooks::FGPresent(void* This, UINT SyncInterval, UINT Flags, const DXGI
         LOG_DEBUG("flags: {:X}, Frametime: {}", Flags, ftDelta);
     }
 
-    if (willPresent && State::Instance().activeFgInput == FGInput::Upscaler &&
-        State::Instance().currentCommandQueue != nullptr)
+    if (willPresent && State::Instance().currentCommandQueue != nullptr)
     {
         UpscalerTimeDx12::ReadUpscalingTime(State::Instance().currentCommandQueue);
     }

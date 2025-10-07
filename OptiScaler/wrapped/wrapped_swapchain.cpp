@@ -45,7 +45,7 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 
     if (willPresent)
     {
-        double ftDelta = 0.0f;
+        double ftDelta = 0.0;
 
         auto now = Util::MillisecondsNow();
 
@@ -68,12 +68,14 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
     // try to obtain directx objects and find the path
     if (pDevice->QueryInterface(IID_PPV_ARGS(&device)) == S_OK)
     {
+        device->Release();
+
         if (!_dx11Device)
             LOG_DEBUG("D3D11Device captured");
 
         _dx11Device = true;
         State::Instance().swapchainApi = DX11;
-        State::Instance().currentD3D11Device == device;
+        State::Instance().currentD3D11Device = device;
 
         if (!State::Instance().DeviceAdapterNames.contains(device))
         {
@@ -125,6 +127,8 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
     }
     else if (pDevice->QueryInterface(IID_PPV_ARGS(&cq)) == S_OK)
     {
+        cq->Release();
+
         if (!_dx12Device)
             LOG_DEBUG("D3D12CommandQueue captured");
 
@@ -139,6 +143,8 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 
         if (cq->GetDevice(IID_PPV_ARGS(&device12)) == S_OK)
         {
+            device12->Release();
+
             if (!_dx12Device)
                 LOG_DEBUG("D3D12Device captured");
 
@@ -204,15 +210,6 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
     // DXVK check, it's here because of upscaler time calculations
     if (State::Instance().isRunningOnDXVK)
     {
-        if (cq != nullptr)
-            cq->Release();
-
-        if (device != nullptr)
-            device->Release();
-
-        if (device12 != nullptr)
-            device12->Release();
-
         if (pPresentParameters == nullptr)
             presentResult = pSwapChain->Present(SyncInterval, Flags);
         else
@@ -252,16 +249,6 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 
     LOG_DEBUG("Original present result: {:X}", (UINT) presentResult);
 
-    // release used objects
-    if (cq != nullptr)
-        cq->Release();
-
-    if (device != nullptr)
-        device->Release();
-
-    if (device12 != nullptr)
-        device12->Release();
-
     if (presentResult == S_OK)
         LOG_TRACE("4 {}, Present result: {:X}", _frameCounter, (UINT) presentResult);
     else
@@ -281,19 +268,19 @@ WrappedIDXGISwapChain4::WrappedIDXGISwapChain4(IDXGISwapChain* real, IUnknown* p
 
     _real->QueryInterface(IID_PPV_ARGS(&_real1));
     if (_real1 != nullptr)
-        _real->Release();
+        _real1->Release();
 
     _real->QueryInterface(IID_PPV_ARGS(&_real2));
     if (_real2 != nullptr)
-        _real->Release();
+        _real2->Release();
 
     _real->QueryInterface(IID_PPV_ARGS(&_real3));
     if (_real3 != nullptr)
-        _real->Release();
+        _real3->Release();
 
     _real->QueryInterface(IID_PPV_ARGS(&_real4));
     if (_real4 != nullptr)
-        _real->Release();
+        _real4->Release();
 
     _real->AddRef();
     auto refCount = _real->Release();
@@ -368,7 +355,7 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::QueryInterface(REFIID riid, vo
             return E_NOINTERFACE;
         }
     }
-    else if (riid == __uuidof(this))
+    else if (riid == __uuidof(WrappedIDXGISwapChain4))
     {
         AddRef();
         *ppvObject = this;
@@ -393,6 +380,7 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::QueryInterface(REFIID riid, vo
         return S_OK;
     }
 
+    *ppvObject = nullptr;
     return E_NOINTERFACE;
 }
 
@@ -903,9 +891,8 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers1(UINT BufferCoun
 
     State::Instance().SCAllowTearing = (SwapChainFlags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) > 0;
 
-    LOG_DEBUG(
-        "BufferCount: {0}, Width: {1}, Height: {2}, NewFormat: {3}, SwapChainFlags: {4:X}, pCreationNodeMask: {5}",
-        BufferCount, Width, Height, (UINT) Format, SwapChainFlags, *pCreationNodeMask);
+    LOG_DEBUG("BufferCount: {}, Width: {}, Height: {}, NewFormat: {}, SwapChainFlags: {:X}", BufferCount, Width, Height,
+              (UINT) Format, SwapChainFlags);
 
     if (Config::Instance()->FGDontUseSwapchainBuffers.value_or_default())
         State::Instance().skipHeapCapture = true;

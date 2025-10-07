@@ -23,10 +23,6 @@ void DxgiFactoryHooks::CheckAdapter(IUnknown* unkAdapter)
     {
         State::Instance().isRunningOnDXVK = dxvkAdapter != nullptr;
         ((IDXGIAdapter*) dxvkAdapter)->Release();
-
-        // Temporary fix for Linux & DXVK
-        if (State::Instance().isRunningOnDXVK || State::Instance().isRunningOnLinux)
-            Config::Instance()->UseHQFont.set_volatile_value(false);
     }
 
     if (adapterOk)
@@ -318,10 +314,15 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
         LOG_WARN("Vulkan is creating swapchain!");
         State::Instance().skipParentWrapping = true;
         State::Instance().skipDxgiLoadChecks = true;
-        return o_CreateSwapChainForHwnd(realFactory, pDevice, hWnd, pDesc, pFullscreenDesc, pRestrictToOutput,
-                                        ppSwapChain);
+        auto result = o_CreateSwapChainForHwnd(realFactory, pDevice, hWnd, pDesc, pFullscreenDesc, pRestrictToOutput,
+                                               ppSwapChain);
         State::Instance().skipDxgiLoadChecks = false;
         State::Instance().skipParentWrapping = false;
+
+        if (firstCall)
+            _skipFGSwapChainCreation = false;
+
+        return result;
     }
 
     if (pDevice == nullptr || pDesc == nullptr)
@@ -329,10 +330,15 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
         LOG_WARN("pDevice or pDesc is nullptr!");
         State::Instance().skipParentWrapping = true;
         State::Instance().skipDxgiLoadChecks = true;
-        return o_CreateSwapChainForHwnd(realFactory, pDevice, hWnd, pDesc, pFullscreenDesc, pRestrictToOutput,
-                                        ppSwapChain);
+        auto result = o_CreateSwapChainForHwnd(realFactory, pDevice, hWnd, pDesc, pFullscreenDesc, pRestrictToOutput,
+                                               ppSwapChain);
         State::Instance().skipDxgiLoadChecks = false;
         State::Instance().skipParentWrapping = false;
+
+        if (firstCall)
+            _skipFGSwapChainCreation = false;
+
+        return result;
     }
 
     if (pDesc->Height < 100 || pDesc->Width < 100)
@@ -340,10 +346,15 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
         LOG_WARN("Overlay call!");
         State::Instance().skipParentWrapping = true;
         State::Instance().skipDxgiLoadChecks = true;
-        return o_CreateSwapChainForHwnd(realFactory, pDevice, hWnd, pDesc, pFullscreenDesc, pRestrictToOutput,
-                                        ppSwapChain);
+        auto result = o_CreateSwapChainForHwnd(realFactory, pDevice, hWnd, pDesc, pFullscreenDesc, pRestrictToOutput,
+                                               ppSwapChain);
         State::Instance().skipDxgiLoadChecks = false;
         State::Instance().skipParentWrapping = false;
+
+        if (firstCall)
+            _skipFGSwapChainCreation = false;
+
+        return result;
     }
 
     LOG_DEBUG("Width: {}, Height: {}, Format: {}, Count: {}, Flags: {:X}, Hwnd: {:X}, SkipWrapping: {}", pDesc->Width,
@@ -454,11 +465,11 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
                 State::Instance().screenHeight = pDesc->Height;
             }
 
-            LOG_DEBUG("Created new swapchain: {0:X}, hWnd: {1:X}", (UINT64) *ppSwapChain, (UINT64) hWnd);
+            LOG_DEBUG("Created new swapchain: {0:X}, hWnd: {1:X}", (uintptr_t) *ppSwapChain, (uintptr_t) hWnd);
             *ppSwapChain = new WrappedIDXGISwapChain4(realSC, readDevice, hWnd, pDesc->Flags, false);
 
-            LOG_DEBUG("Created new WrappedIDXGISwapChain4: {0:X}, pDevice: {1:X}", (UINT64) *ppSwapChain,
-                      (UINT64) pDevice);
+            LOG_DEBUG("Created new WrappedIDXGISwapChain4: {0:X}, pDevice: {1:X}", (uintptr_t) *ppSwapChain,
+                      (uintptr_t) pDevice);
 
             if (!_skipFGSwapChainCreation)
                 State::Instance().currentSwapchain = *ppSwapChain;
@@ -591,7 +602,7 @@ HRESULT DxgiFactoryHooks::EnumAdapters(IDXGIFactory* realFactory, UINT Adapter, 
             State::Instance().skipDxgiLoadChecks = true;
 
             result = o_EnumAdapterByGpuPreference(factory6, Adapter, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
-                                                  __uuidof(IDXGIAdapter), (IUnknown**) ppAdapter);
+                                                  __uuidof(IDXGIAdapter1), (IUnknown**) ppAdapter);
 
             State::Instance().skipDxgiLoadChecks = false;
             _skipHighPerfCheck = false;
@@ -645,7 +656,7 @@ HRESULT DxgiFactoryHooks::EnumAdapters(IDXGIFactory* realFactory, UINT Adapter, 
     }
 
 #if _DEBUG
-    LOG_TRACE("result: {:X}, Adapter: {}, pAdapter: {:X}", (UINT) result, Adapter, (size_t) *ppAdapter);
+    LOG_TRACE("result: {:X}, Adapter: {}, pAdapter: {:X}", (UINT) result, Adapter, (uintptr_t) *ppAdapter);
 #endif
 
     return result;
@@ -674,7 +685,7 @@ HRESULT DxgiFactoryHooks::EnumAdapters1(IDXGIFactory1* realFactory, UINT Adapter
             State::Instance().skipDxgiLoadChecks = true;
 
             result = o_EnumAdapterByGpuPreference(factory6, Adapter, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
-                                                  __uuidof(IDXGIAdapter), (IUnknown**) ppAdapter);
+                                                  __uuidof(IDXGIAdapter1), (IUnknown**) ppAdapter);
 
             State::Instance().skipDxgiLoadChecks = false;
             _skipHighPerfCheck = false;
@@ -726,7 +737,7 @@ HRESULT DxgiFactoryHooks::EnumAdapters1(IDXGIFactory1* realFactory, UINT Adapter
     }
 
 #if _DEBUG
-    LOG_TRACE("result: {:X}, Adapter: {}, pAdapter: {:X}", (UINT) result, Adapter, (size_t) *ppAdapter);
+    LOG_TRACE("result: {:X}, Adapter: {}, pAdapter: {:X}", (UINT) result, Adapter, (uintptr_t) *ppAdapter);
 #endif
 
     return result;
@@ -748,7 +759,7 @@ HRESULT DxgiFactoryHooks::EnumAdapterByLuid(IDXGIFactory4* realFactory, LUID Ada
     }
 
 #if _DEBUG
-    LOG_TRACE("result: {:X}, pAdapter: {:X}", (UINT) result, (size_t) *ppvAdapter);
+    LOG_TRACE("result: {:X}, pAdapter: {:X}", (UINT) result, (uintptr_t) *ppvAdapter);
 #endif
 
     return result;
@@ -770,7 +781,7 @@ HRESULT DxgiFactoryHooks::EnumAdapterByGpuPreference(IDXGIFactory6* realFactory,
     }
 
 #if _DEBUG
-    LOG_TRACE("result: {:X}, Adapter: {}, pAdapter: {:X}", (UINT) result, Adapter, (size_t) *ppvAdapter);
+    LOG_TRACE("result: {:X}, Adapter: {}, pAdapter: {:X}", (UINT) result, Adapter, (uintptr_t) *ppvAdapter);
 #endif
 
     return result;

@@ -273,7 +273,7 @@ static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVE
                                                               ppDevice, pFeatureLevel, ppImmediateContext);
 
                 State::Instance().skipParentWrapping = false;
-                _skipDx11Create = true;
+                _skipDx11Create = false;
 
                 return result;
             }
@@ -378,8 +378,17 @@ static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVE
         LOG_DEBUG("Created new swapchain: {0:X}, hWnd: {1:X}", (UINT64) *ppSwapChain,
                   (UINT64) pSwapChainDesc->OutputWindow);
 
-        *ppSwapChain =
-            new WrappedIDXGISwapChain4(realSC, realDevice, pSwapChainDesc->OutputWindow, pSwapChainDesc->Flags, false);
+        WrappedIDXGISwapChain4* wsc = nullptr;
+        if (realSC->QueryInterface(IID_PPV_ARGS(&wsc)) != S_OK)
+        {
+            *ppSwapChain = new WrappedIDXGISwapChain4(realSC, realDevice, pSwapChainDesc->OutputWindow,
+                                                      pSwapChainDesc->Flags, false);
+        }
+        else
+        {
+            *ppSwapChain = wsc;
+            wsc->Release();
+        }
 
         State::Instance().currentSwapchain = *ppSwapChain;
         State::Instance().currentWrappedSwapchain = *ppSwapChain;

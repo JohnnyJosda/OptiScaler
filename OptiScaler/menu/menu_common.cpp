@@ -1730,8 +1730,11 @@ bool MenuCommon::RenderMenu()
     // FPS Overlay font
     auto fpsScale = Config::Instance()->FpsScale.value_or(Config::Instance()->MenuScale.value_or_default());
 
-    // If Fps overlay is visible
-    if (Config::Instance()->ShowFps.value_or_default())
+    // Update frame time & upscaler time averages
+    float averageFrameTime = 0.0f;
+    float averageUpscalerFT = 0.0f;
+
+    if (Config::Instance()->ShowFps.value_or_default() || _isVisible)
     {
         float frameCnt = 0;
         frameTime = 0;
@@ -1753,9 +1756,13 @@ bool MenuCommon::RenderMenu()
         gFrameTimes.Push(lastFT);
         gUpscalerTimes.Push(lastUT);
 
-        float averageFrameTime = gFrameTimes.Average();
-        float averageUpscalerFT = gUpscalerTimes.Average();
+        averageFrameTime = gFrameTimes.Average();
+        averageUpscalerFT = gUpscalerTimes.Average();
+    }
 
+    // If Fps overlay is visible
+    if (Config::Instance()->ShowFps.value_or_default())
+    {
         // Set overlay position
         ImGui::SetNextWindowPos(overlayPosition, ImGuiCond_Always);
 
@@ -5308,7 +5315,7 @@ bool MenuCommon::RenderMenu()
 
                             ImGui::TableSetColumnIndex(0);
 
-                            ImGui::Text("%08x, Count: %s, %s", (size_t) it->first, it->second.usageCount,
+                            ImGui::Text("%08x, Count: %llu, %s", (size_t) it->first, it->second.usageCount,
                                         it->second.enabled ? "Active" : "Passive");
 
                             ImGui::TableSetColumnIndex(1);

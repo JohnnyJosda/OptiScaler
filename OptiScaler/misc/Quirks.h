@@ -26,6 +26,7 @@ enum class GameQuirk : uint64_t
     DisableVsyncOverride,
     UseNtDllHooks,
     UseFSR2PatternMatching,
+    AlwaysCaptureFSRFGSwapchain,
 
     // Quirks that are applied deeper in code
     CyberpunkHudlessStateOverride,
@@ -66,11 +67,12 @@ static const QuirkEntry quirkTable[] = {
 
     // Visions of Mana
     // Use FSR2 Pattern Matching to fix broken FSR2 detection
+    QUIRK_ENTRY("visionsofmana-win64-shipping.exe", GameQuirk::UseFSR2PatternMatching, GameQuirk::DisableDxgiSpoofing),
+    QUIRK_ENTRY("visionsofmana-wingdk-shipping.exe", GameQuirk::UseFSR2PatternMatching, GameQuirk::DisableDxgiSpoofing),
 
-    QUIRK_ENTRY("visionsofmana-win64-shipping.exe.exe", GameQuirk::UseFSR2PatternMatching,
-                GameQuirk::DisableDxgiSpoofing),
-    QUIRK_ENTRY("visionsofmana-wingdk-shipping.exe.exe", GameQuirk::UseFSR2PatternMatching,
-                GameQuirk::DisableDxgiSpoofing),
+    // Silent Hill f
+    QUIRK_ENTRY("shf-win64-shipping.exe", GameQuirk::AlwaysCaptureFSRFGSwapchain),
+    QUIRK_ENTRY("shf-wingdk-shipping.exe", GameQuirk::AlwaysCaptureFSRFGSwapchain),
 
     // Path of Exile 2
     QUIRK_ENTRY("pathofexile.exe", GameQuirk::LoadD3D12Manually),
@@ -155,7 +157,7 @@ static const QuirkEntry quirkTable[] = {
     // Collection, Warhammer 40,000: Darktide, Dying Light 2 Stay Human, Dying Light: The Beast, Observer: System Redux,
     // Sackboy: A Big Adventure, Hellblade: Senua's Sacrifice, Pumpkin Jack, Metro Exodus Enhanced Edition, Rise of the
     // Ronin, DYNASTY WARRIORS: ORIGINS, Crysis Remastered, Crysis 2 Remastered, Mortal Shell, Sekiro: Shadows Die
-    // Twice (for SekiroTSR mod), The Medium
+    // Twice (for SekiroTSR mod), The Medium, NINJA GAIDEN 4 (+ WinGDK)
     QUIRK_ENTRY("witcher3.exe", GameQuirk::DisableDxgiSpoofing),
     QUIRK_ENTRY("alanwake2.exe", GameQuirk::DisableDxgiSpoofing),
     QUIRK_ENTRY("crysis3remastered.exe", GameQuirk::DisableDxgiSpoofing),
@@ -179,6 +181,8 @@ static const QuirkEntry quirkTable[] = {
     QUIRK_ENTRY("dungeonhaven-win64-shipping.exe", GameQuirk::DisableDxgiSpoofing),
     QUIRK_ENTRY("sekiro.exe", GameQuirk::DisableDxgiSpoofing),
     QUIRK_ENTRY("medium-win64-shipping.exe", GameQuirk::DisableDxgiSpoofing),
+    QUIRK_ENTRY("ninjagaiden4-steam.exe", GameQuirk::DisableDxgiSpoofing),
+    QUIRK_ENTRY("ninjagaiden4-wingdk.exe", GameQuirk::DisableDxgiSpoofing), // NG4 WinGDK
 
     // FSR2 only, no spoof needed
     //
@@ -191,7 +195,7 @@ static const QuirkEntry quirkTable[] = {
     //
     // Red Dead Redemption 2, Forgive Me Father 2, Revenge of the Savage Planet, F1 22, Metal Eden, Until Dawn, Bloom
     // and Rage, 171, Microsoft Flight Simulator (2020) - MSFS2020, Star Wars: Outlaws, Banishers: Ghosts of New Eden,
-    // Rune Factory Guardians of Azuma, Supraworld, F1 Manager 2024
+    // Rune Factory Guardians of Azuma, Supraworld, F1 Manager 2024, Keeper (+ WinGDK PaganIdol version)
     QUIRK_ENTRY("rdr2.exe", GameQuirk::DisableFSR2Inputs, GameQuirk::DisableFSR3Inputs),
     QUIRK_ENTRY("playrdr2.exe", GameQuirk::DisableFSR2Inputs, GameQuirk::DisableFSR3Inputs),
     QUIRK_ENTRY("fmf2-win64-shipping.exe", GameQuirk::DisableFSR2Inputs, GameQuirk::DisableFSR3Inputs),
@@ -209,6 +213,9 @@ static const QuirkEntry quirkTable[] = {
     QUIRK_ENTRY("game-win64-shipping.exe", GameQuirk::DisableFSR2Inputs, GameQuirk::DisableFSR3Inputs), // Rune
     QUIRK_ENTRY("supraworld-win64-shipping.exe", GameQuirk::DisableFSR2Inputs, GameQuirk::DisableFSR3Inputs),
     QUIRK_ENTRY("f1manager24.exe", GameQuirk::DisableFSR2Inputs, GameQuirk::DisableFSR3Inputs),
+    QUIRK_ENTRY("keeper-win64-shipping.exe", GameQuirk::DisableFSR2Inputs, GameQuirk::DisableFSR3Inputs),
+    QUIRK_ENTRY("paganidol-wingdk-shipping.exe", GameQuirk::DisableFSR2Inputs,
+                GameQuirk::DisableFSR3Inputs), // Keeper WinGDK PaganIdol
 
     // Self-explanatory
     //
@@ -312,6 +319,8 @@ static void printQuirks(flag_set<GameQuirk>& quirks)
         spdlog::info("Quirk: Using NTdll hooks instead of kernel ones");
     if (quirks & GameQuirk::UseFSR2PatternMatching)
         spdlog::info("Quirk: Use FSR2 pattern matching");
+    if (quirks & GameQuirk::AlwaysCaptureFSRFGSwapchain)
+        spdlog::info("Quirk: Always capture FSR-FG swapchain");
 
     return;
 }

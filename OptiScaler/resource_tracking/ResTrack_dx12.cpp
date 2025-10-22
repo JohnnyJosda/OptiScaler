@@ -138,17 +138,20 @@ bool ResTrack_Dx12::CheckResource(ID3D12Resource* resource)
     if (State::Instance().currentSwapchain == nullptr || State::Instance().isShuttingDown)
         return false;
 
+    auto resDesc = resource->GetDesc();
+
+    if (resDesc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D)
+        return false;
+
+    if (State::Instance().frameCount == 0)
+        return false;
+
     DXGI_SWAP_CHAIN_DESC scDesc {};
     if (State::Instance().currentSwapchain->GetDesc(&scDesc) != S_OK)
     {
         LOG_WARN("Can't get swapchain desc!");
         return false;
     }
-
-    auto resDesc = resource->GetDesc();
-
-    if (resDesc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D)
-        return false;
 
     if (resDesc.Height != scDesc.BufferDesc.Height || resDesc.Width != scDesc.BufferDesc.Width)
     {
@@ -314,7 +317,7 @@ HeapInfo* ResTrack_Dx12::GetHeapByCpuHandleCBV(SIZE_T cpuHandle)
             return heapInfo;
     }
 
-    for (size_t i = 0; i < fgHeapIndex; i++)
+    for (UINT i = 0; i < fgHeapIndex; i++)
     {
         if (fgHeaps[i]->active && fgHeaps[i]->cpuStart <= cpuHandle && fgHeaps[i]->cpuEnd > cpuHandle)
         {
@@ -340,7 +343,7 @@ HeapInfo* ResTrack_Dx12::GetHeapByCpuHandleRTV(SIZE_T cpuHandle)
             return heapInfo;
     }
 
-    for (size_t i = 0; i < fgHeapIndex; i++)
+    for (UINT i = 0; i < fgHeapIndex; i++)
     {
         if (fgHeaps[i]->active && fgHeaps[i]->cpuStart <= cpuHandle && fgHeaps[i]->cpuEnd > cpuHandle)
         {
@@ -366,7 +369,7 @@ HeapInfo* ResTrack_Dx12::GetHeapByCpuHandleSRV(SIZE_T cpuHandle)
             return heapInfo;
     }
 
-    for (size_t i = 0; i < fgHeapIndex; i++)
+    for (UINT i = 0; i < fgHeapIndex; i++)
     {
         if (fgHeaps[i]->active && fgHeaps[i]->cpuStart <= cpuHandle && fgHeaps[i]->cpuEnd > cpuHandle)
         {
@@ -392,7 +395,7 @@ HeapInfo* ResTrack_Dx12::GetHeapByCpuHandleUAV(SIZE_T cpuHandle)
             return heapInfo;
     }
 
-    for (size_t i = 0; i < fgHeapIndex; i++)
+    for (UINT i = 0; i < fgHeapIndex; i++)
     {
         if (fgHeaps[i]->active && fgHeaps[i]->cpuStart <= cpuHandle && fgHeaps[i]->cpuEnd > cpuHandle)
         {
@@ -422,7 +425,7 @@ HeapInfo* ResTrack_Dx12::GetHeapByCpuHandle(SIZE_T cpuHandle)
         }
     }
 
-    for (size_t i = 0; i < fgHeapIndex; i++)
+    for (UINT i = 0; i < fgHeapIndex; i++)
     {
         if (fgHeaps[i]->active && fgHeaps[i]->cpuStart <= cpuHandle && fgHeaps[i]->cpuEnd > cpuHandle)
         {
@@ -452,7 +455,7 @@ HeapInfo* ResTrack_Dx12::GetHeapByGpuHandleGR(SIZE_T gpuHandle)
         }
     }
 
-    for (size_t i = 0; i < fgHeapIndex; i++)
+    for (UINT i = 0; i < fgHeapIndex; i++)
     {
         if (fgHeaps[i]->active && fgHeaps[i]->gpuStart <= gpuHandle && fgHeaps[i]->gpuEnd > gpuHandle)
         {
@@ -485,7 +488,7 @@ HeapInfo* ResTrack_Dx12::GetHeapByGpuHandleCR(SIZE_T gpuHandle)
         }
     }
 
-    for (size_t i = 0; i < fgHeapIndex; i++)
+    for (UINT i = 0; i < fgHeapIndex; i++)
     {
         if (fgHeaps[i]->active && fgHeaps[i]->gpuStart <= gpuHandle && fgHeaps[i]->gpuEnd > gpuHandle)
         {

@@ -1,9 +1,11 @@
 #pragma once
+
 #include "pch.h"
+
 #include "State.h"
+
 #include <optional>
 #include <filesystem>
-#include <SimpleIni.h>
 
 enum HasDefaultValue
 {
@@ -156,7 +158,7 @@ template <class T, HasDefaultValue defaultState = WithDefault> class CustomOptio
     }
 };
 
-constexpr int UnboundKey = -1;
+constexpr inline int UnboundKey = -1;
 
 enum FpsOverlay : uint32_t
 {
@@ -412,8 +414,8 @@ class Config
     CustomOptional<int> FGHUDLimit { 1 };
     CustomOptional<bool> FGHUDFixExtended { false };
     CustomOptional<bool> FGImmediateCapture { false };
-    CustomOptional<bool> FGDontUseSwapchainBuffers { false };
-    CustomOptional<bool> FGRelaxedResolutionCheck { false };
+    CustomOptional<bool> FGDontUseSwapchainBuffers { true };
+    CustomOptional<bool> FGRelaxedResolutionCheck { true };
 
     // OptiFG - Resource Tracking
     CustomOptional<bool> FGAlwaysTrackHeaps { false };
@@ -496,8 +498,6 @@ class Config
     inline static Config* _config;
     inline static std::vector<std::string> _log;
 
-    CSimpleIniA ini;
-    CSimpleIniA fakenvapiIni;
     std::filesystem::path absoluteFileName;
     std::wstring fileName = L"OptiScaler.ini";
 

@@ -556,9 +556,9 @@ bool XeFG_Dx12::Dispatch()
         std::swap(_cameraNear[fIndex], _cameraFar[fIndex]);
 
     if (_infiniteDepth && _cameraFar[fIndex] > _cameraNear[fIndex])
-        _cameraFar[fIndex] = INFINITY;
+        _cameraFar[fIndex] = std::numeric_limits<float>::infinity();
     else if (_infiniteDepth && _cameraNear[fIndex] > _cameraFar[fIndex])
-        _cameraNear[fIndex] = INFINITY;
+        _cameraNear[fIndex] = std::numeric_limits<float>::infinity();
 
     // Cyberpunk seems to be sending LH so do the same
     // it also sends some extra data in usually empty spots but no idea what that is
@@ -582,7 +582,12 @@ bool XeFG_Dx12::Dispatch()
     constData.jitterOffsetY = _jitterY[fIndex];
     constData.motionVectorScaleX = _mvScaleX[fIndex];
     constData.motionVectorScaleY = _mvScaleY[fIndex];
-    constData.resetHistory = _reset[fIndex];
+
+    if (!Config::Instance()->FGSkipReset.value_or_default())
+        constData.resetHistory = _reset[fIndex];
+    else
+        constData.resetHistory = false;
+
     constData.frameRenderTime = static_cast<float>(State::Instance().lastFGFrameTime);
 
     LOG_DEBUG("Reset: {}, FTDelta: {}", _reset[fIndex], constData.frameRenderTime);

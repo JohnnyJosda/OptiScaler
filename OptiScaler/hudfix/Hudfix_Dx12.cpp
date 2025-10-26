@@ -217,7 +217,7 @@ bool Hudfix_Dx12::CheckCapture()
     return true;
 }
 
-bool Hudfix_Dx12::CheckResource(ResourceInfo* resource)
+bool Hudfix_Dx12::CheckResource(std::string caller, ResourceInfo* resource)
 {
     if (resource == nullptr || resource->buffer == nullptr || State::Instance().isShuttingDown)
         return false;
@@ -269,7 +269,7 @@ bool Hudfix_Dx12::CheckResource(ResourceInfo* resource)
     // format match
     if (resDesc.Format == s.currentSwapchainDesc.BufferDesc.Format)
     {
-        LOG_DEBUG("Width: {}/{}, Height: {}/{}, Format: {}/{}, Resource: {:X}, convertFormat: {} -> TRUE",
+        LOG_DEBUG("{} Width: {}/{}, Height: {}/{}, Format: {}/{}, Resource: {:X}, convertFormat: {} -> TRUE", caller,
                   resDesc.Width, s.currentSwapchainDesc.BufferDesc.Width, resDesc.Height,
                   s.currentSwapchainDesc.BufferDesc.Height, (UINT) resDesc.Format,
                   (UINT) s.currentSwapchainDesc.BufferDesc.Format, (size_t) resource->buffer,
@@ -309,7 +309,7 @@ bool Hudfix_Dx12::CheckResource(ResourceInfo* resource)
          s.currentSwapchainDesc.BufferDesc.Format == DXGI_FORMAT_B8G8R8A8_UNORM ||
          s.currentSwapchainDesc.BufferDesc.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB))
     {
-        LOG_DEBUG("Width: {}/{}, Height: {}/{}, Format: {}/{}, Resource: {:X}, convertFormat: {} -> TRUE",
+        LOG_DEBUG("{} Width: {}/{}, Height: {}/{}, Format: {}/{}, Resource: {:X}, convertFormat: {} -> TRUE", caller,
                   resDesc.Width, s.currentSwapchainDesc.BufferDesc.Width, resDesc.Height,
                   s.currentSwapchainDesc.BufferDesc.Height, (UINT) resDesc.Format,
                   (UINT) s.currentSwapchainDesc.BufferDesc.Format, (size_t) resource->buffer,
@@ -341,7 +341,7 @@ void Hudfix_Dx12::HudlessFound(ID3D12GraphicsCommandList* cmdList)
     //     fg->Dispatch();
 
     // Increase counter
-    _fgCounter++;
+    _fgCounter = _upscaleCounter;
 
     _skipHudlessChecks = false;
 }
@@ -401,7 +401,11 @@ void Hudfix_Dx12::UpscaleEnd(UINT64 frameId, double lastFGFrameTime)
     _captureCounter[index] = 0;
 }
 
-void Hudfix_Dx12::PresentStart() { return; }
+void Hudfix_Dx12::PresentStart()
+{
+    _fgCounter = _upscaleCounter;
+    return;
+}
 
 void Hudfix_Dx12::PresentEnd() { LOG_DEBUG(""); }
 
@@ -412,23 +416,42 @@ UINT64 Hudfix_Dx12::ActivePresentFrame() { return _fgCounter; }
 bool Hudfix_Dx12::IsResourceCheckActive()
 {
     if (State::Instance().isShuttingDown)
+    {
+        // LOG_TRACK("State::Instance().isShuttingDown");
         return false;
+    }
 
     if (_upscaleCounter <= _fgCounter)
+    {
+        // LOG_TRACK("_upscaleCounter <= _fgCounter: {} <= {}", _upscaleCounter, _fgCounter);
         return false;
+    }
 
     if (!Config::Instance()->FGEnabled.value_or_default() || !Config::Instance()->FGHUDFix.value_or_default())
+    {
+        // LOG_TRACK(
+        //     "!Config::Instance()->FGEnabled.value_or_default() || !Config::Instance()->FGHUDFix.value_or_default()");
         return false;
+    }
 
     if (State::Instance().currentFeature == nullptr || State::Instance().currentFG == nullptr)
+    {
+        // LOG_TRACK("State::Instance().currentFeature == nullptr || State::Instance().currentFG == nullptr");
         return false;
+    }
 
     if (!State::Instance().currentFG->IsActive() || State::Instance().FGchanged)
+    {
+        // LOG_TRACK("!State::Instance().currentFG->IsActive() || State::Instance().FGchanged");
         return false;
+    }
 
     auto fg = reinterpret_cast<IFGFeature_Dx12*>(State::Instance().currentFG);
     if (fg == nullptr)
+    {
+        // LOG_TRACK("fg == nullptr");
         return false;
+    }
 
     return true;
 }
@@ -448,7 +471,7 @@ bool Hudfix_Dx12::CheckForHudless(std::string callerName, ID3D12GraphicsCommandL
 
     do
     {
-        if (!CheckResource(resource))
+        if (!CheckResource(callerName, resource))
             break;
 
         CapturedHudlessInfo* capturedHudlessInfo = &s.CapturedHudlesses[resource->buffer];

@@ -143,9 +143,6 @@ bool ResTrack_Dx12::CheckResource(ID3D12Resource* resource)
     if (resDesc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D)
         return false;
 
-    if (State::Instance().frameCount == 0)
-        return false;
-
     auto& s = State::Instance();
 
     if (resDesc.Height != s.currentSwapchainDesc.BufferDesc.Height ||
@@ -517,32 +514,40 @@ bool ResTrack_Dx12::IsHudFixActive()
 {
     if (!Config::Instance()->FGEnabled.value_or_default() || !Config::Instance()->FGHUDFix.value_or_default())
     {
+        LOG_TRACK(
+            "!Config::Instance()->FGEnabled.value_or_default() || !Config::Instance()->FGHUDFix.value_or_default()");
         return false;
     }
 
     if (State::Instance().currentFG == nullptr || State::Instance().currentFeature == nullptr ||
         State::Instance().FGchanged)
     {
+        LOG_TRACK("State::Instance().currentFG == nullptr || State::Instance().currentFeature == nullptr || "
+                  "State::Instance().FGchanged");
         return false;
     }
 
     if (!State::Instance().currentFG->IsActive())
     {
+        LOG_TRACK("!State::Instance().currentFG->IsActive()");
         return false;
     }
 
     if (!_presentDone)
     {
+        LOG_TRACK("!_presentDone");
         return false;
     }
 
     if (Hudfix_Dx12::SkipHudlessChecks())
     {
+        LOG_TRACK("!Hudfix_Dx12::SkipHudlessChecks()");
         return false;
     }
 
     if (!Hudfix_Dx12::IsResourceCheckActive())
     {
+        // LOG_TRACK("!Hudfix_Dx12::IsResourceCheckActive()");
         return false;
     }
 
@@ -1687,11 +1692,11 @@ void ResTrack_Dx12::HookCommandList(ID3D12Device* InDevice)
                     if (o_OMSetRenderTargets != nullptr)
                         DetourAttach(&(PVOID&) o_OMSetRenderTargets, hkOMSetRenderTargets);
 
-                    if (o_SetGraphicsRootDescriptorTable != nullptr)
-                        DetourAttach(&(PVOID&) o_SetGraphicsRootDescriptorTable, hkSetGraphicsRootDescriptorTable);
+                    // if (o_SetGraphicsRootDescriptorTable != nullptr)
+                    //     DetourAttach(&(PVOID&) o_SetGraphicsRootDescriptorTable, hkSetGraphicsRootDescriptorTable);
 
-                    if (o_SetComputeRootDescriptorTable != nullptr)
-                        DetourAttach(&(PVOID&) o_SetComputeRootDescriptorTable, hkSetComputeRootDescriptorTable);
+                    // if (o_SetComputeRootDescriptorTable != nullptr)
+                    //     DetourAttach(&(PVOID&) o_SetComputeRootDescriptorTable, hkSetComputeRootDescriptorTable);
 
                     if (o_DrawIndexedInstanced != nullptr)
                         DetourAttach(&(PVOID&) o_DrawIndexedInstanced, hkDrawIndexedInstanced);
@@ -1760,61 +1765,58 @@ void ResTrack_Dx12::HookToQueue(ID3D12Device* InDevice)
 
 void ResTrack_Dx12::HookDevice(ID3D12Device* device)
 {
-    if (State::Instance().activeFgInput == FGInput::Nukems)
+    if (o_CreateDescriptorHeap != nullptr || State::Instance().activeFgInput == FGInput::Nukems)
         return;
 
     if (device == nullptr)
         return;
 
-    if (o_CreateDescriptorHeap == nullptr)
+    LOG_FUNC();
+
+    ID3D12Device* realDevice = nullptr;
+    if (!CheckForRealObject(__FUNCTION__, device, (IUnknown**) &realDevice))
+        realDevice = device;
+
+    // Get the vtable pointer
+    PVOID* pVTable = *(PVOID**) realDevice;
+
+    // Hudfix
+    o_CreateDescriptorHeap = (PFN_CreateDescriptorHeap) pVTable[14];
+    o_CreateConstantBufferView = (PFN_CreateConstantBufferView) pVTable[17];
+    o_CreateShaderResourceView = (PFN_CreateShaderResourceView) pVTable[18];
+    o_CreateUnorderedAccessView = (PFN_CreateUnorderedAccessView) pVTable[19];
+    o_CreateRenderTargetView = (PFN_CreateRenderTargetView) pVTable[20];
+    o_CreateDepthStencilView = (PFN_CreateDepthStencilView) pVTable[21];
+    o_CreateSampler = (PFN_CreateSampler) pVTable[22];
+    o_CopyDescriptors = (PFN_CopyDescriptors) pVTable[23];
+    o_CopyDescriptorsSimple = (PFN_CopyDescriptorsSimple) pVTable[24];
+
+    // Apply the detour
+    // Only needed for Hudfix
+    if (o_CreateDescriptorHeap != nullptr && State::Instance().activeFgInput == FGInput::Upscaler)
     {
-        LOG_FUNC();
+        DetourTransactionBegin();
+        DetourUpdateThread(GetCurrentThread());
 
-        ID3D12Device* realDevice = nullptr;
-        if (!CheckForRealObject(__FUNCTION__, device, (IUnknown**) &realDevice))
-            realDevice = device;
+        if (o_CreateDescriptorHeap != nullptr)
+            DetourAttach(&(PVOID&) o_CreateDescriptorHeap, hkCreateDescriptorHeap);
 
-        // Get the vtable pointer
-        PVOID* pVTable = *(PVOID**) realDevice;
+        if (o_CreateRenderTargetView != nullptr)
+            DetourAttach(&(PVOID&) o_CreateRenderTargetView, hkCreateRenderTargetView);
 
-        // Hudfix
-        o_CreateDescriptorHeap = (PFN_CreateDescriptorHeap) pVTable[14];
-        o_CreateConstantBufferView = (PFN_CreateConstantBufferView) pVTable[17];
-        o_CreateShaderResourceView = (PFN_CreateShaderResourceView) pVTable[18];
-        o_CreateUnorderedAccessView = (PFN_CreateUnorderedAccessView) pVTable[19];
-        o_CreateRenderTargetView = (PFN_CreateRenderTargetView) pVTable[20];
-        o_CreateDepthStencilView = (PFN_CreateDepthStencilView) pVTable[21];
-        o_CreateSampler = (PFN_CreateSampler) pVTable[22];
-        o_CopyDescriptors = (PFN_CopyDescriptors) pVTable[23];
-        o_CopyDescriptorsSimple = (PFN_CopyDescriptorsSimple) pVTable[24];
+        if (o_CreateShaderResourceView != nullptr)
+            DetourAttach(&(PVOID&) o_CreateShaderResourceView, hkCreateShaderResourceView);
 
-        // Apply the detour
-        // Only needed for Hudfix
-        if (o_CreateDescriptorHeap != nullptr && State::Instance().activeFgInput == FGInput::Upscaler)
-        {
-            DetourTransactionBegin();
-            DetourUpdateThread(GetCurrentThread());
+        if (o_CreateUnorderedAccessView != nullptr)
+            DetourAttach(&(PVOID&) o_CreateUnorderedAccessView, hkCreateUnorderedAccessView);
 
-            if (o_CreateDescriptorHeap != nullptr)
-                DetourAttach(&(PVOID&) o_CreateDescriptorHeap, hkCreateDescriptorHeap);
+        if (o_CopyDescriptors != nullptr)
+            DetourAttach(&(PVOID&) o_CopyDescriptors, hkCopyDescriptors);
 
-            if (o_CreateRenderTargetView != nullptr)
-                DetourAttach(&(PVOID&) o_CreateRenderTargetView, hkCreateRenderTargetView);
+        if (o_CopyDescriptorsSimple != nullptr)
+            DetourAttach(&(PVOID&) o_CopyDescriptorsSimple, hkCopyDescriptorsSimple);
 
-            if (o_CreateShaderResourceView != nullptr)
-                DetourAttach(&(PVOID&) o_CreateShaderResourceView, hkCreateShaderResourceView);
-
-            if (o_CreateUnorderedAccessView != nullptr)
-                DetourAttach(&(PVOID&) o_CreateUnorderedAccessView, hkCreateUnorderedAccessView);
-
-            if (o_CopyDescriptors != nullptr)
-                DetourAttach(&(PVOID&) o_CopyDescriptors, hkCopyDescriptors);
-
-            if (o_CopyDescriptorsSimple != nullptr)
-                DetourAttach(&(PVOID&) o_CopyDescriptorsSimple, hkCopyDescriptorsSimple);
-
-            DetourTransactionCommit();
-        }
+        DetourTransactionCommit();
     }
 
     // Only needed for FSR-FG Feature

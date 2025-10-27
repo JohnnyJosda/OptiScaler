@@ -581,6 +581,9 @@ void ResTrack_Dx12::hkCreateRenderTargetView(ID3D12Device* This, ID3D12Resource*
 
     o_CreateRenderTargetView(This, pResource, pDesc, DestDescriptor);
 
+    if (Config::Instance()->FGHudfixDisableRTV.value_or_default())
+        return;
+
     if (pResource == nullptr)
     {
         auto heap = GetHeapByCpuHandleRTV(DestDescriptor.ptr);
@@ -600,6 +603,7 @@ void ResTrack_Dx12::hkCreateRenderTargetView(ID3D12Device* This, ID3D12Resource*
         ResourceInfo resInfo {};
         FillResourceInfo(pResource, &resInfo);
         resInfo.type = RTV;
+        resInfo.captureInfo = CaptureInfo::CreateRTV;
         heap->SetByCpuHandle(DestDescriptor.ptr, resInfo);
     }
     // else
@@ -631,6 +635,9 @@ void ResTrack_Dx12::hkCreateShaderResourceView(ID3D12Device* This, ID3D12Resourc
 
     o_CreateShaderResourceView(This, pResource, pDesc, DestDescriptor);
 
+    if (Config::Instance()->FGHudfixDisableSRV.value_or_default())
+        return;
+
     if (pResource == nullptr)
     {
         auto heap = GetHeapByCpuHandleSRV(DestDescriptor.ptr);
@@ -650,6 +657,7 @@ void ResTrack_Dx12::hkCreateShaderResourceView(ID3D12Device* This, ID3D12Resourc
         ResourceInfo resInfo {};
         FillResourceInfo(pResource, &resInfo);
         resInfo.type = SRV;
+        resInfo.captureInfo = CaptureInfo::CreateSRV;
         heap->SetByCpuHandle(DestDescriptor.ptr, resInfo);
     }
     // else
@@ -681,6 +689,9 @@ void ResTrack_Dx12::hkCreateUnorderedAccessView(ID3D12Device* This, ID3D12Resour
 
     o_CreateUnorderedAccessView(This, pResource, pCounterResource, pDesc, DestDescriptor);
 
+    if (Config::Instance()->FGHudfixDisableUAV.value_or_default())
+        return;
+
     if (pResource == nullptr)
     {
         auto heap = GetHeapByCpuHandleUAV(DestDescriptor.ptr);
@@ -700,6 +711,7 @@ void ResTrack_Dx12::hkCreateUnorderedAccessView(ID3D12Device* This, ID3D12Resour
         ResourceInfo resInfo {};
         FillResourceInfo(pResource, &resInfo);
         resInfo.type = UAV;
+        resInfo.captureInfo = CaptureInfo::CreateUAV;
         heap->SetByCpuHandle(DestDescriptor.ptr, resInfo);
     }
     // else
@@ -1101,7 +1113,8 @@ void ResTrack_Dx12::hkCopyDescriptorsSimple(ID3D12Device* This, UINT NumDescript
 void ResTrack_Dx12::hkSetGraphicsRootDescriptorTable(ID3D12GraphicsCommandList* This, UINT RootParameterIndex,
                                                      D3D12_GPU_DESCRIPTOR_HANDLE BaseDescriptor)
 {
-    if (BaseDescriptor.ptr == 0 || !IsHudFixActive() || Hudfix_Dx12::SkipHudlessChecks())
+    if (Config::Instance()->FGHudfixDisableSGR.value_or_default() || BaseDescriptor.ptr == 0 || !IsHudFixActive() ||
+        Hudfix_Dx12::SkipHudlessChecks())
     {
         o_SetGraphicsRootDescriptorTable(This, RootParameterIndex, BaseDescriptor);
         return;
@@ -1133,12 +1146,13 @@ void ResTrack_Dx12::hkSetGraphicsRootDescriptorTable(ID3D12GraphicsCommandList* 
     }
 
     capturedBuffer->state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    capturedBuffer->captureInfo = CaptureInfo::SetGR;
 
     do
     {
         if (Config::Instance()->FGImmediateCapture.value_or_default())
         {
-            if (Hudfix_Dx12::CheckForHudless(__FUNCTION__, This, capturedBuffer, capturedBuffer->state))
+            if (Hudfix_Dx12::CheckForHudless(This, capturedBuffer, capturedBuffer->state))
             {
                 break;
             }
@@ -1174,8 +1188,8 @@ void ResTrack_Dx12::hkOMSetRenderTargets(ID3D12GraphicsCommandList* This, UINT N
                                          BOOL RTsSingleHandleToDescriptorRange,
                                          D3D12_CPU_DESCRIPTOR_HANDLE* pDepthStencilDescriptor)
 {
-    if (NumRenderTargetDescriptors == 0 || pRenderTargetDescriptors == nullptr || !IsHudFixActive() ||
-        Hudfix_Dx12::SkipHudlessChecks())
+    if (Config::Instance()->FGHudfixDisableOM.value_or_default() || NumRenderTargetDescriptors == 0 ||
+        pRenderTargetDescriptors == nullptr || !IsHudFixActive() || Hudfix_Dx12::SkipHudlessChecks())
     {
         o_OMSetRenderTargets(This, NumRenderTargetDescriptors, pRenderTargetDescriptors,
                              RTsSingleHandleToDescriptorRange, pDepthStencilDescriptor);
@@ -1231,10 +1245,11 @@ void ResTrack_Dx12::hkOMSetRenderTargets(ID3D12GraphicsCommandList* This, UINT N
             }
 
             capturedBuffer->state = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            capturedBuffer->captureInfo = CaptureInfo::OMSetRTV;
 
             if (Config::Instance()->FGImmediateCapture.value_or_default())
             {
-                if (Hudfix_Dx12::CheckForHudless(__FUNCTION__, This, capturedBuffer, capturedBuffer->state))
+                if (Hudfix_Dx12::CheckForHudless(This, capturedBuffer, capturedBuffer->state))
                 {
                     LOG_TRACK("CmdList: {:X}, Hudless Resource: {:X}, Format: {} Desc: {:X}", (size_t) This,
                               (size_t) capturedBuffer->buffer, (UINT) capturedBuffer->format, handle.ptr);
@@ -1273,7 +1288,8 @@ void ResTrack_Dx12::hkOMSetRenderTargets(ID3D12GraphicsCommandList* This, UINT N
 void ResTrack_Dx12::hkSetComputeRootDescriptorTable(ID3D12GraphicsCommandList* This, UINT RootParameterIndex,
                                                     D3D12_GPU_DESCRIPTOR_HANDLE BaseDescriptor)
 {
-    if (BaseDescriptor.ptr == 0 || !IsHudFixActive() || Hudfix_Dx12::SkipHudlessChecks())
+    if (Config::Instance()->FGHudfixDisableSCR.value_or_default() || BaseDescriptor.ptr == 0 || !IsHudFixActive() ||
+        Hudfix_Dx12::SkipHudlessChecks())
     {
         o_SetComputeRootDescriptorTable(This, RootParameterIndex, BaseDescriptor);
         return;
@@ -1313,11 +1329,13 @@ void ResTrack_Dx12::hkSetComputeRootDescriptorTable(ID3D12GraphicsCommandList* T
     else
         capturedBuffer->state = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 
+    capturedBuffer->captureInfo = CaptureInfo::SetCR;
+
     do
     {
         if (Config::Instance()->FGImmediateCapture.value_or_default())
         {
-            if (Hudfix_Dx12::CheckForHudless(__FUNCTION__, This, capturedBuffer, capturedBuffer->state))
+            if (Hudfix_Dx12::CheckForHudless(This, capturedBuffer, capturedBuffer->state))
             {
                 break;
             }
@@ -1390,11 +1408,16 @@ void ResTrack_Dx12::hkDrawInstanced(ID3D12GraphicsCommandList* This, UINT Vertex
                 if (val0.size() == 0)
                     break;
 
+                if (Config::Instance()->FGHudfixDisableDI.value_or_default())
+                    break;
+
                 for (auto& [key, val] : val0)
                 {
                     std::lock_guard<std::mutex> lock(_drawMutex);
 
-                    if (Hudfix_Dx12::CheckForHudless(__FUNCTION__, This, &val, val.state))
+                    val.captureInfo |= CaptureInfo::DrawInstanced;
+
+                    if (Hudfix_Dx12::CheckForHudless(This, &val, val.state))
                     {
                         break;
                     }
@@ -1452,12 +1475,17 @@ void ResTrack_Dx12::hkDrawIndexedInstanced(ID3D12GraphicsCommandList* This, UINT
                 if (val0.size() == 0)
                     break;
 
+                if (Config::Instance()->FGHudfixDisableDII.value_or_default())
+                    break;
+
                 for (auto& [key, val] : val0)
                 {
                     // LOG_DEBUG("Waiting _drawMutex {:X}", (size_t)val.buffer);
                     std::lock_guard<std::mutex> lock(_drawMutex);
 
-                    if (Hudfix_Dx12::CheckForHudless(__FUNCTION__, This, &val, val.state))
+                    val.captureInfo |= CaptureInfo::DrawIndexedInstanced;
+
+                    if (Hudfix_Dx12::CheckForHudless(This, &val, val.state))
                     {
                         break;
                     }
@@ -1592,12 +1620,16 @@ void ResTrack_Dx12::hkDispatch(ID3D12GraphicsCommandList* This, UINT ThreadGroup
                 if (val0.size() == 0)
                     break;
 
+                if (Config::Instance()->FGHudfixDisableDispatch.value_or_default())
+                    break;
+
                 for (auto& [key, val] : val0)
                 {
                     // LOG_DEBUG("Waiting _drawMutex {:X}", (size_t)val.buffer);
                     std::lock_guard<std::mutex> lock(_drawMutex);
 
-                    if (Hudfix_Dx12::CheckForHudless(__FUNCTION__, This, &val, val.state))
+                    val.captureInfo |= CaptureInfo::Dispatch;
+                    if (Hudfix_Dx12::CheckForHudless(This, &val, val.state))
                     {
                         break;
                     }
@@ -1692,11 +1724,11 @@ void ResTrack_Dx12::HookCommandList(ID3D12Device* InDevice)
                     if (o_OMSetRenderTargets != nullptr)
                         DetourAttach(&(PVOID&) o_OMSetRenderTargets, hkOMSetRenderTargets);
 
-                    // if (o_SetGraphicsRootDescriptorTable != nullptr)
-                    //     DetourAttach(&(PVOID&) o_SetGraphicsRootDescriptorTable, hkSetGraphicsRootDescriptorTable);
+                    if (o_SetGraphicsRootDescriptorTable != nullptr)
+                        DetourAttach(&(PVOID&) o_SetGraphicsRootDescriptorTable, hkSetGraphicsRootDescriptorTable);
 
-                    // if (o_SetComputeRootDescriptorTable != nullptr)
-                    //     DetourAttach(&(PVOID&) o_SetComputeRootDescriptorTable, hkSetComputeRootDescriptorTable);
+                    if (o_SetComputeRootDescriptorTable != nullptr)
+                        DetourAttach(&(PVOID&) o_SetComputeRootDescriptorTable, hkSetComputeRootDescriptorTable);
 
                     if (o_DrawIndexedInstanced != nullptr)
                         DetourAttach(&(PVOID&) o_DrawIndexedInstanced, hkDrawIndexedInstanced);

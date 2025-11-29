@@ -12,7 +12,6 @@
 
 static ID3D12Device* _device = nullptr;
 static FG_Constants _fgConst {};
-static UINT64 _currentFrameId = 0;
 
 static FfxApiPresentCallbackFunc _presentCallback = nullptr;
 static void* _presentCallbackUserContext = nullptr;
@@ -21,13 +20,59 @@ static void* _fgCallbackUserContext = nullptr;
 static UINT64 _callbackFrameId = 0;
 static FfxApiRect2D _callbackRect = {};
 
-static std::mutex _newFrameMutex;
+// static std::mutex _newFrameMutex;
 
 static ID3D12Resource* _hudless[BUFFER_COUNT] = {};
 static ID3D12Resource* _interpolation[BUFFER_COUNT] = {};
 static Dx12Resource _uiRes[BUFFER_COUNT] = {};
 
 // #define PASSTHRU
+
+std::mutex _frameBoundaryMutex;
+bool _isFrameFinished = true;
+
+uint64_t _currentFrameId = 0;
+int _currentIndex = -1;
+uint64_t _lastFrameId = UINT32_MAX;
+uint64_t _frameIdIndex[BUFFER_COUNT] = { UINT64_MAX, UINT64_MAX, UINT64_MAX, UINT64_MAX };
+
+void CheckForFrame(IFGFeature_Dx12* fg, uint64_t frameId)
+{
+    std::scoped_lock lock(_frameBoundaryMutex);
+
+    if (_isFrameFinished && _lastFrameId == _currentFrameId)
+    {
+        _isFrameFinished = false;
+
+        fg->StartNewFrame();
+        _currentIndex = fg->GetIndex();
+
+        if (frameId != 0)
+            _currentFrameId = frameId;
+        else
+            _currentFrameId = _lastFrameId + 1;
+
+        _frameIdIndex[_currentIndex] = _currentFrameId;
+    }
+    else if (frameId != 0 && frameId > _currentFrameId)
+    {
+        fg->StartNewFrame();
+        _currentIndex = fg->GetIndex();
+        _currentFrameId = frameId;
+        _frameIdIndex[_currentIndex] = _currentFrameId;
+    }
+}
+
+int IndexForFrameId(uint64_t frameId)
+{
+    for (int i = 0; i < BUFFER_COUNT; i++)
+    {
+        if (_frameIdIndex[i] == frameId)
+            return i;
+    }
+
+    return -1;
+}
 
 static FfxApiResourceState GetFfxApiState(D3D12_RESOURCE_STATES state)
 {
@@ -124,7 +169,7 @@ static bool CreateBufferResource(ID3D12Device* InDevice, ID3D12Resource* InResou
 
     CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
 
-    inDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET; //    | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    inDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
     hr = InDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &inDesc, InState, nullptr,
                                            IID_PPV_ARGS(OutResource));
@@ -388,18 +433,14 @@ ffxReturnCode_t ffxConfigure_Dx12FG(ffxContext* context, ffxConfigureDescHeader*
     {
         auto cDesc = (ffxConfigureDescFrameGeneration*) desc;
 
-        {
-            std::lock_guard<std::mutex> lock(_newFrameMutex);
-            if (cDesc->frameID > _currentFrameId)
-            {
-                _currentFrameId = cDesc->frameID;
-                fg->StartNewFrame();
-                _uiRes[fg->GetIndex()] = {};
-            }
-        }
+        CheckForFrame(fg, cDesc->frameID);
 
-        LOG_DEBUG("FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION frameID: {}, enabled: {} ", cDesc->frameID,
-                  cDesc->frameGenerationEnabled);
+        auto fIndex = IndexForFrameId(cDesc->frameID);
+        if (fIndex < 0)
+            fIndex = _currentIndex;
+
+        LOG_DEBUG("FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION frameID: {}, enabled: {}, fIndex: {} ", cDesc->frameID,
+                  cDesc->frameGenerationEnabled, fIndex);
 
         s.FSRFGInputActive = cDesc->frameGenerationEnabled;
 
@@ -414,8 +455,8 @@ ffxReturnCode_t ffxConfigure_Dx12FG(ffxContext* context, ffxConfigureDescHeader*
             fg->ResetCounters();
         }
 
-        fg->SetInterpolationRect(cDesc->generationRect.width, cDesc->generationRect.height);
-        fg->SetInterpolationPos(cDesc->generationRect.left, cDesc->generationRect.top);
+        fg->SetInterpolationRect(cDesc->generationRect.width, cDesc->generationRect.height, fIndex);
+        fg->SetInterpolationPos(cDesc->generationRect.left, cDesc->generationRect.top, fIndex);
 
         UINT width = cDesc->generationRect.width;
         UINT height = cDesc->generationRect.height;
@@ -453,6 +494,7 @@ ffxReturnCode_t ffxConfigure_Dx12FG(ffxContext* context, ffxConfigureDescHeader*
                     dfr.width = width;
                     dfr.left = left;
                     dfr.top = top;
+                    dfr.frameIndex = fIndex;
 
                     fg->SetResource(&dfr);
                 }
@@ -465,14 +507,16 @@ ffxReturnCode_t ffxConfigure_Dx12FG(ffxContext* context, ffxConfigureDescHeader*
                 if (fg->FrameGenerationContext() != nullptr && crDesc->uiResource.resource != nullptr)
                 {
                     auto validity = FG_ResourceValidity::UntilPresent;
-                    if ((crDesc->flags & FFX_FRAMEGENERATION_UI_COMPOSITION_FLAG_ENABLE_INTERNAL_UI_DOUBLE_BUFFERING) >
-                        0)
-                    {
-                        LOG_WARN("FFX_FRAMEGENERATION_UI_COMPOSITION_FLAG_ENABLE_INTERNAL_UI_DOUBLE_BUFFERING is set!");
+                    // if ((crDesc->flags & FFX_FRAMEGENERATION_UI_COMPOSITION_FLAG_ENABLE_INTERNAL_UI_DOUBLE_BUFFERING)
+                    // >
+                    //     0)
+                    //{
+                    //     LOG_WARN("FFX_FRAMEGENERATION_UI_COMPOSITION_FLAG_ENABLE_INTERNAL_UI_DOUBLE_BUFFERING is
+                    //     set!");
 
-                        // Not sure which cmdList to use
-                        // validity = FG_ResourceValidity::ValidButMakeCopy;
-                    }
+                    //    // Not sure which cmdList to use
+                    //     validity = FG_ResourceValidity::ValidButMakeCopy;
+                    //}
 
                     Dx12Resource ui {};
                     ui.cmdList = nullptr; // Not sure about this
@@ -484,8 +528,9 @@ ffxReturnCode_t ffxConfigure_Dx12FG(ffxContext* context, ffxConfigureDescHeader*
                     ui.width = width;
                     ui.left = left;
                     ui.top = top;
+                    ui.frameIndex = fIndex;
 
-                    _uiRes[fg->GetIndex()] = ui;
+                    _uiRes[fIndex] = ui;
 
                     fg->SetResource(&ui);
                 }
@@ -504,6 +549,7 @@ ffxReturnCode_t ffxConfigure_Dx12FG(ffxContext* context, ffxConfigureDescHeader*
             hudless.width = width;
             hudless.left = left;
             hudless.top = top;
+            hudless.frameIndex = fIndex;
 
             fg->SetResource(&hudless);
         }
@@ -604,8 +650,9 @@ ffxReturnCode_t ffxConfigure_Dx12FG(ffxContext* context, ffxConfigureDescHeader*
                         ui.width = width;
                         ui.left = left;
                         ui.top = top;
+                        ui.frameIndex = _currentIndex;
 
-                        _uiRes[fg->GetIndex()] = ui;
+                        _uiRes[_currentIndex] = ui;
 
                         fg->SetResource(&ui);
                     }
@@ -622,6 +669,7 @@ ffxReturnCode_t ffxConfigure_Dx12FG(ffxContext* context, ffxConfigureDescHeader*
             dfr.width = width;
             dfr.left = left;
             dfr.top = top;
+            dfr.frameIndex = _currentIndex;
 
             fg->SetResource(&dfr);
         }
@@ -675,6 +723,7 @@ ffxReturnCode_t ffxConfigure_Dx12FG(ffxContext* context, ffxConfigureDescHeader*
                         dfr.width = width;
                         dfr.left = left;
                         dfr.top = top;
+                        dfr.frameIndex = _currentIndex;
 
                         fg->SetResource(&dfr);
                     }
@@ -691,8 +740,9 @@ ffxReturnCode_t ffxConfigure_Dx12FG(ffxContext* context, ffxConfigureDescHeader*
             ui.width = width;
             ui.left = left;
             ui.top = top;
+            ui.frameIndex = _currentIndex;
 
-            _uiRes[fg->GetIndex()] = ui;
+            _uiRes[_currentIndex] = ui;
 
             fg->SetResource(&ui);
         }
@@ -813,9 +863,17 @@ ffxReturnCode_t ffxDispatch_Dx12FG(ffxContext* context, ffxDispatchDescHeader* d
 
         if (fg != nullptr)
         {
-            fg->SetInterpolationPos(cdDesc->generationRect.left, cdDesc->generationRect.top);
-            fg->SetInterpolationRect(cdDesc->generationRect.width, cdDesc->generationRect.height);
-            fg->SetReset(cdDesc->reset ? 1 : 0);
+            auto fIndex = IndexForFrameId(cdDesc->frameID);
+
+            if (fIndex < 0)
+            {
+                LOG_ERROR("Invalid frameID: {}", cdDesc->frameID);
+                fIndex = _currentIndex;
+            }
+
+            fg->SetInterpolationPos(cdDesc->generationRect.left, cdDesc->generationRect.top, fIndex);
+            fg->SetInterpolationRect(cdDesc->generationRect.width, cdDesc->generationRect.height, fIndex);
+            fg->SetReset(cdDesc->reset ? 1 : 0, fIndex);
 
             if (cdDesc->presentColor.resource != nullptr && fg->GetResource(FG_ResourceType::HudlessColor) == nullptr)
             {
@@ -842,6 +900,8 @@ ffxReturnCode_t ffxDispatch_Dx12FG(ffxContext* context, ffxDispatchDescHeader* d
                 hudless.width = width;
                 hudless.top = top;
                 hudless.left = left;
+                hudless.frameIndex = fIndex;
+
                 fg->SetResource(&hudless);
             }
         }
@@ -854,15 +914,8 @@ ffxReturnCode_t ffxDispatch_Dx12FG(ffxContext* context, ffxDispatchDescHeader* d
         auto cdDesc = (ffxDispatchDescFrameGenerationPrepare*) desc;
         LOG_DEBUG("DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE, frameID: {}", cdDesc->frameID);
 
-        {
-            std::lock_guard<std::mutex> lock(_newFrameMutex);
-            if (cdDesc->frameID > _currentFrameId)
-            {
-                _currentFrameId = cdDesc->frameID;
-                fg->StartNewFrame();
-                _uiRes[fg->GetIndex()] = {};
-            }
-        }
+        CheckForFrame(fg, cdDesc->frameID);
+        auto fIndex = IndexForFrameId(cdDesc->frameID);
 
         auto device = _device == nullptr ? s.currentD3D12Device : _device;
         fg->EvaluateState(device, _fgConst);
@@ -883,7 +936,7 @@ ffxReturnCode_t ffxDispatch_Dx12FG(ffxContext* context, ffxDispatchDescHeader* d
                 auto cameraDesc = (ffxDispatchDescFrameGenerationPrepareCameraInfo*) next;
 
                 fg->SetCameraData(cameraDesc->cameraPosition, cameraDesc->cameraUp, cameraDesc->cameraRight,
-                                  cameraDesc->cameraForward);
+                                  cameraDesc->cameraForward, fIndex);
 
                 cameraDataFound = true;
                 break;
@@ -893,15 +946,16 @@ ffxReturnCode_t ffxDispatch_Dx12FG(ffxContext* context, ffxDispatchDescHeader* d
         // Camera Values
         UINT64 dispWidth = 0;
         UINT dispHeight = 0;
-        fg->GetInterpolationRect(dispWidth, dispHeight);
+        fg->GetInterpolationRect(dispWidth, dispHeight, fIndex);
         auto aspectRatio = (float) dispWidth / (float) dispHeight;
-        fg->SetCameraValues(cdDesc->cameraNear, cdDesc->cameraFar, cdDesc->cameraFovAngleVertical, aspectRatio);
+        fg->SetCameraValues(cdDesc->cameraNear, cdDesc->cameraFar, cdDesc->cameraFovAngleVertical, aspectRatio, 0.0f,
+                            fIndex);
 
         // Other values
-        fg->SetFrameTimeDelta(cdDesc->frameTimeDelta);
-        fg->SetJitter(cdDesc->jitterOffset.x, cdDesc->jitterOffset.y);
-        fg->SetMVScale(cdDesc->motionVectorScale.x, cdDesc->motionVectorScale.y);
-        fg->SetReset(cdDesc->unused_reset ? 1 : 0);
+        fg->SetFrameTimeDelta(cdDesc->frameTimeDelta, fIndex);
+        fg->SetJitter(cdDesc->jitterOffset.x, cdDesc->jitterOffset.y, fIndex);
+        fg->SetMVScale(cdDesc->motionVectorScale.x, cdDesc->motionVectorScale.y, fIndex);
+        fg->SetReset(cdDesc->unused_reset ? 1 : 0, fIndex);
 
         if (cdDesc->depth.resource != nullptr)
         {
@@ -913,6 +967,7 @@ ffxReturnCode_t ffxDispatch_Dx12FG(ffxContext* context, ffxDispatchDescHeader* d
             depth.type = FG_ResourceType::Depth;
             depth.validity = FG_ResourceValidity::JustTrackCmdlist;
             depth.width = cdDesc->renderSize.width; // cdDesc->depth.description.height;
+            depth.frameIndex = fIndex;
 
             fg->SetResource(&depth);
         }
@@ -941,6 +996,7 @@ ffxReturnCode_t ffxDispatch_Dx12FG(ffxContext* context, ffxDispatchDescHeader* d
             velocity.type = FG_ResourceType::Velocity;
             velocity.validity = FG_ResourceValidity::JustTrackCmdlist;
             velocity.width = width; // cdDesc->motionVectors.description.height;
+            velocity.frameIndex = fIndex;
 
             fg->SetResource(&velocity);
         }
@@ -959,6 +1015,8 @@ ffxReturnCode_t ffxDispatch_Dx12FG(ffxContext* context, ffxDispatchDescHeader* d
 
 void ffxPresentCallback()
 {
+    _isFrameFinished = true;
+
 #ifdef PASSTHRU
     return;
 #endif
@@ -973,8 +1031,16 @@ void ffxPresentCallback()
     if (fg == nullptr)
         return;
 
-    auto fIndex = fg->GetIndex();
+    auto fIndex = IndexForFrameId(_callbackFrameId);
+
+    if (fIndex < 0)
+        fIndex = _currentIndex;
+
+    if (fIndex < 0)
+        return;
+
     auto cmdList = fg->GetUICommandList(fIndex);
+
     ID3D12Resource* currentBuffer = nullptr;
 
     if (_presentCallback != nullptr)
@@ -1005,7 +1071,7 @@ void ffxPresentCallback()
         currentBuffer->Release();
         currentBuffer->SetName(std::format(L"currentBuffer[{}]", scIndex).c_str());
 
-        if (CreateBufferResource(_device, currentBuffer, D3D12_RESOURCE_STATE_COMMON, &_hudless[fIndex]))
+        if (CreateBufferResource(_device, currentBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &_hudless[fIndex]))
             _hudless[fIndex]->SetName(std::format(L"_hudless[{}]", fIndex).c_str());
         else
             return;
@@ -1047,6 +1113,8 @@ void ffxPresentCallback()
                 hudless.type = FG_ResourceType::HudlessColor;
                 hudless.validity = FG_ResourceValidity::ValidNow;
                 hudless.width = hDesc.Width;
+                hudless.frameIndex = fIndex;
+
                 fg->SetResource(&hudless);
             }
         }
@@ -1134,6 +1202,8 @@ void ffxPresentCallback()
                 hudless.type = FG_ResourceType::HudlessColor;
                 hudless.validity = FG_ResourceValidity::ValidNow;
                 hudless.width = hDesc.Width;
+                hudless.frameIndex = fIndex;
+
                 fg->SetResource(&hudless);
             }
         }

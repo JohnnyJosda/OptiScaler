@@ -452,6 +452,7 @@ class Config
 
     CustomOptional<bool> FSRFGSkipConfigForHudless { false };
     CustomOptional<bool> FSRFGSkipDispatchForHudless { false };
+    CustomOptional<bool> FSRFGDepthAndVelocityValidNow { false };
 
     // OptiFG - XeFG
     CustomOptional<bool> FGXeFGDepthInverted { false };

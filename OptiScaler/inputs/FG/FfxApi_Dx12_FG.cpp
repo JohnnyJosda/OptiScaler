@@ -28,7 +28,6 @@ static Dx12Resource _uiRes[BUFFER_COUNT] = {};
 // #define PASSTHRU
 
 std::mutex _frameBoundaryMutex;
-bool _isFrameFinished = true;
 
 uint64_t _currentFrameId = 0;
 int _currentIndex = -1;
@@ -39,23 +38,7 @@ void CheckForFrame(IFGFeature_Dx12* fg, uint64_t frameId)
 {
     std::scoped_lock lock(_frameBoundaryMutex);
 
-    if (_isFrameFinished && _lastFrameId == _currentFrameId)
-    {
-        _isFrameFinished = false;
-
-        LOG_DEBUG("Frame finished, frameId: {}", frameId);
-
-        fg->StartNewFrame();
-        _currentIndex = fg->GetIndex();
-
-        if (frameId != 0)
-            _currentFrameId = frameId;
-        else
-            _currentFrameId = _lastFrameId + 1;
-
-        _frameIdIndex[_currentIndex] = _currentFrameId;
-    }
-    else if (frameId != 0 && frameId > _currentFrameId)
+    if (frameId != 0 && frameId > _currentFrameId)
     {
         LOG_DEBUG("frameId: {} > _currentFrameId: {}", frameId, _currentFrameId);
         fg->StartNewFrame();
@@ -439,7 +422,7 @@ ffxReturnCode_t ffxConfigure_Dx12FG(ffxContext* context, ffxConfigureDescHeader*
 
         auto fIndex = IndexForFrameId(cDesc->frameID);
         if (fIndex < 0)
-            fIndex = fg->GetIndexWillBeDispatched();
+            fIndex = fg->GetIndex();
 
         LOG_DEBUG("FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION frameID: {}, enabled: {}, fIndex: {} ", cDesc->frameID,
                   cDesc->frameGenerationEnabled, fIndex);
@@ -540,8 +523,7 @@ ffxReturnCode_t ffxConfigure_Dx12FG(ffxContext* context, ffxConfigureDescHeader*
         }
 
         if (cDesc->HUDLessColor.resource != nullptr &&
-            !Config::Instance()->FSRFGSkipConfigForHudless.value_or_default() &&
-            fg->GetResource(FG_ResourceType::HudlessColor) == nullptr)
+            !Config::Instance()->FSRFGSkipConfigForHudless.value_or_default())
         {
             Dx12Resource hudless {};
             hudless.cmdList = nullptr; // Not sure about this
@@ -558,15 +540,15 @@ ffxReturnCode_t ffxConfigure_Dx12FG(ffxContext* context, ffxConfigureDescHeader*
             fg->SetResource(&hudless);
         }
 
-        // if (cDesc->frameGenerationCallback != nullptr && cDesc->frameGenerationEnabled)
-        //{
-        //     LOG_DEBUG("frameGenerationCallback exist");
+        if (cDesc->frameGenerationCallback != nullptr && cDesc->frameGenerationEnabled)
+        {
+            LOG_DEBUG("frameGenerationCallback exist");
 
-        //    _callbackFrameId = cDesc->frameID;
-        //    _callbackRect = cDesc->generationRect;
-        //    _fgCallback = cDesc->frameGenerationCallback;
-        //    _fgCallbackUserContext = cDesc->frameGenerationCallbackUserContext;
-        //}
+            _callbackFrameId = cDesc->frameID;
+            _callbackRect = cDesc->generationRect;
+            _fgCallback = cDesc->frameGenerationCallback;
+            _fgCallbackUserContext = cDesc->frameGenerationCallbackUserContext;
+        }
 
         if (cDesc->presentCallback != nullptr)
         {
@@ -972,7 +954,12 @@ ffxReturnCode_t ffxDispatch_Dx12FG(ffxContext* context, ffxDispatchDescHeader* d
             depth.resource = (ID3D12Resource*) cdDesc->depth.resource;
             depth.state = GetD3D12State((FfxApiResourceState) cdDesc->depth.state);
             depth.type = FG_ResourceType::Depth;
-            depth.validity = FG_ResourceValidity::JustTrackCmdlist;
+
+            if (Config::Instance()->FSRFGDepthAndVelocityValidNow.value_or_default())
+                depth.validity = FG_ResourceValidity::ValidNow;
+            else
+                depth.validity = FG_ResourceValidity::JustTrackCmdlist;
+
             depth.width = cdDesc->renderSize.width; // cdDesc->depth.description.height;
             depth.frameIndex = fIndex;
 
@@ -1001,7 +988,12 @@ ffxReturnCode_t ffxDispatch_Dx12FG(ffxContext* context, ffxDispatchDescHeader* d
             velocity.resource = (ID3D12Resource*) cdDesc->motionVectors.resource;
             velocity.state = GetD3D12State((FfxApiResourceState) cdDesc->motionVectors.state);
             velocity.type = FG_ResourceType::Velocity;
-            velocity.validity = FG_ResourceValidity::JustTrackCmdlist;
+
+            if (Config::Instance()->FSRFGDepthAndVelocityValidNow.value_or_default())
+                velocity.validity = FG_ResourceValidity::ValidNow;
+            else
+                velocity.validity = FG_ResourceValidity::JustTrackCmdlist;
+
             velocity.width = width; // cdDesc->motionVectors.description.height;
             velocity.frameIndex = fIndex;
 
@@ -1022,7 +1014,6 @@ ffxReturnCode_t ffxDispatch_Dx12FG(ffxContext* context, ffxDispatchDescHeader* d
 
 void ffxPresentCallback()
 {
-    _isFrameFinished = true;
     _lastFrameId = _currentFrameId;
 
 #ifdef PASSTHRU
@@ -1036,19 +1027,21 @@ void ffxPresentCallback()
 
     auto fg = State::Instance().currentFG;
 
-    if (fg == nullptr)
+    if (fg == nullptr && fg->FrameGenerationContext() != nullptr)
         return;
+
+    // if (_lastCallbackFrameId == 0 || _lastCallbackFrameId > _callbackFrameId ||
+    //     (_callbackFrameId - _lastCallbackFrameId) > 2)
+    //{
+    //     _lastCallbackFrameId = _callbackFrameId - 1;
+    // }
+
+    //_lastCallbackFrameId++;
+
+    _lastCallbackFrameId = _callbackFrameId;
 
     LOG_DEBUG("_callbackFrameId: {}, _lastCallbackFrameId: {}, fIndex: {}", _callbackFrameId, _lastCallbackFrameId,
               fg->GetIndexWillBeDispatched());
-
-    if (_lastCallbackFrameId == 0 || _lastCallbackFrameId > _callbackFrameId ||
-        (_callbackFrameId - _lastCallbackFrameId) > 2)
-    {
-        _lastCallbackFrameId = _callbackFrameId - 1;
-    }
-
-    _lastCallbackFrameId++;
 
     auto fIndex = fg->GetIndexWillBeDispatched();
     auto cmdList = fg->GetUICommandList(fIndex);

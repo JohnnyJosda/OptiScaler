@@ -454,7 +454,8 @@ void XeFG_Dx12::Activate()
     if (State::Instance().activeFgInput == FGInput::Upscaler && currentFeature != nullptr)
         nativeAA = currentFeature->RenderWidth() == currentFeature->DisplayWidth();
 
-    if (_swapChainContext != nullptr && _fgContext != nullptr && !_isActive && (IsLowResMV() || nativeAA))
+    if (_swapChainContext != nullptr && _fgContext != nullptr && !_isActive &&
+        (IsLowResMV() || nativeAA || Config::Instance()->FGXeFGIgnoreInitChecks.value_or_default()))
     {
         auto result = XeFGProxy::SetEnabled()(_swapChainContext, true);
 
@@ -488,10 +489,18 @@ void XeFG_Dx12::Deactivate()
             _uiCommandListResetted[fIndex] = false;
         }
 
-        auto result = XeFGProxy::SetEnabled()(_swapChainContext, false);
+        xefg_swapchain_result_t result = XEFG_SWAPCHAIN_RESULT_SUCCESS;
 
-        if (result == XEFG_SWAPCHAIN_RESULT_SUCCESS)
+        if (_swapChainContext != nullptr)
+        {
+            result = XeFGProxy::SetEnabled()(_swapChainContext, false);
+            if (result == XEFG_SWAPCHAIN_RESULT_SUCCESS)
+                _isActive = false;
+        }
+        else
+        {
             _isActive = false;
+        }
 
         _lastDispatchedFrame = 0;
         _waitingNewFrameData = false;

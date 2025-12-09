@@ -714,8 +714,7 @@ static void CheckWorkingMode()
                 D3D12Hooks::Hook();
             }
 
-            if (D3d12Proxy::Module() == nullptr && (State::Instance().gameQuirks & GameQuirk::LoadD3D12Manually ||
-                                                    Config::Instance()->LoadReShade.value_or_default()))
+            if (D3d12Proxy::Module() == nullptr && State::Instance().gameQuirks & GameQuirk::LoadD3D12Manually)
             {
                 LOG_DEBUG("Loading d3d12.dll manually");
                 D3d12Proxy::Init();
@@ -884,7 +883,7 @@ static void CheckWorkingMode()
             // SpecialK
             if (skModule == nullptr && Config::Instance()->LoadSpecialK.value_or_default())
             {
-                auto skFile = Util::DllPath().parent_path() / L"SpecialK64.dll";
+                auto skFile = Util::ExePath().parent_path() / L"SpecialK64.dll";
                 SetEnvironmentVariableW(L"RESHADE_DISABLE_GRAPHICS_HOOK", L"1");
 
                 State::EnableServeOriginal(200);
@@ -897,21 +896,21 @@ static void CheckWorkingMode()
             // ReShade
             // Do not load Reshade here is Luma is active and we will create D3D12 device for it
             // We will load Reshade after D3D12 device creation in that case
-            // if (reshadeModule == nullptr && Config::Instance()->LoadReShade.value_or_default() &&
-            //    !(State::Instance().gameQuirks & GameQuirk::CreateD3D12DeviceForLuma))
-            //{
-            //    auto rsFile = Util::DllPath().parent_path() / L"ReShade64.dll";
-            //    SetEnvironmentVariableW(L"RESHADE_DISABLE_LOADING_CHECK", L"1");
+            if (reshadeModule == nullptr && Config::Instance()->LoadReShade.value_or_default() &&
+                !(State::Instance().gameQuirks & GameQuirk::CreateD3D12DeviceForLuma))
+            {
+                auto rsFile = Util::ExePath().parent_path() / L"ReShade64.dll";
+                SetEnvironmentVariableW(L"RESHADE_DISABLE_LOADING_CHECK", L"1");
 
-            //    if (skModule != nullptr)
-            //        SetEnvironmentVariableW(L"RESHADE_DISABLE_GRAPHICS_HOOK", L"1");
+                if (skModule != nullptr)
+                    SetEnvironmentVariableW(L"RESHADE_DISABLE_GRAPHICS_HOOK", L"1");
 
-            //    State::EnableServeOriginal(201);
-            //    reshadeModule = NtdllProxy::LoadLibraryExW_Ldr(rsFile.c_str(), NULL, 0);
-            //    State::DisableServeOriginal(201);
+                State::EnableServeOriginal(201);
+                reshadeModule = NtdllProxy::LoadLibraryExW_Ldr(rsFile.c_str(), NULL, 0);
+                State::DisableServeOriginal(201);
 
-            //    LOG_INFO("Loading ReShade64.dll, result: {0:X}", (size_t) reshadeModule);
-            //}
+                LOG_INFO("Loading ReShade64.dll, result: {0:X}", (size_t) reshadeModule);
+            }
 
             // Hook kernel32 methods
             if (!Config::Instance()->EarlyHooking.value_or_default())
@@ -1268,74 +1267,97 @@ static void CheckQuirks()
     if (quirks & GameQuirk::DisableXeFGChecks && !Config::Instance()->FGXeFGIgnoreInitChecks.has_value())
         Config::Instance()->FGXeFGIgnoreInitChecks.set_volatile_value(true);
 
-    if (Config::Instance()->LoadReShade.value_or_default())
+    // For Luma, we assume if Luma addon in game folder it's used
+    const auto dir = Util::ExePath().parent_path();
+    bool lumaDetected = false;
+
+    for (const auto& entry : std::filesystem::directory_iterator(dir))
     {
-        // For Luma, we assume if Luma addon in game folder it's used
-        if (!Config::Instance()->DontUseNTShared.has_value())
+        if (!entry.is_regular_file())
+            continue;
+
+        const auto& path = entry.path();
+        if (path.extension() == L".addon")
         {
-            const auto dir = Util::ExePath().parent_path();
-            bool lumaDetected = false;
-
-            for (const auto& entry : std::filesystem::directory_iterator(dir))
+            const auto fname = path.filename().wstring();
+            if (fname.rfind(L"Luma-", 0) == 0) // starts with "Luma-"
             {
-                if (!entry.is_regular_file())
-                    continue;
-
-                const auto& path = entry.path();
-                if (path.extension() == L".addon")
-                {
-                    const auto fname = path.filename().wstring();
-                    if (fname.rfind(L"Luma-", 0) == 0) // starts with "Luma-"
-                    {
-                        lumaDetected = true;
-                        break;
-                    }
-                }
-            }
-
-            if (lumaDetected)
-            {
-                LOG_INFO("Luma detected, enabling DontUseNTShared");
-                State::Instance().detectedQuirks.push_back("Luma detected, enabling DontUseNTShared");
-                Config::Instance()->DontUseNTShared.set_volatile_value(true);
-
-                // If early creating of D3D12 device is not disabled and FSR Agility SDK Upgrade is enabled
-                if (!Config::Instance()->DontCreateD3D12DeviceForLuma.value_or_default() &&
-                    Config::Instance()->FsrAgilitySDKUpgrade.value_or_default())
-                {
-                    quirks |= GameQuirk::LoadD3D12Manually;
-                    quirks |= GameQuirk::CreateD3D12DeviceForLuma;
-                }
-            }
-        }
-
-        // For Luma Unreal Engine games
-        if (std::filesystem::exists(Util::ExePath().parent_path() / L"Luma-Unreal Engine.addon"))
-        {
-            if (!Config::Instance()->DxgiSpoofing.has_value())
-            {
-                LOG_INFO("Luma UE detected, disabling DxgiSpoofing");
-                State::Instance().detectedQuirks.push_back("Luma UE detected, disabling DxgiSpoofing");
-                Config::Instance()->DxgiSpoofing.set_volatile_value(false);
+                lumaDetected = true;
+                break;
             }
         }
     }
 
-    if ((Config::Instance()->LoadReShade.value_or_default() || Config::Instance()->LoadSpecialK.value_or_default()) &&
+    if (lumaDetected)
+    {
+        if (!Config::Instance()->DxgiSpoofing.has_value())
+        {
+            LOG_INFO("Luma UE detected, disabling DxgiSpoofing");
+            State::Instance().detectedQuirks.push_back("Luma UE detected, disabling DxgiSpoofing");
+            Config::Instance()->DxgiSpoofing.set_volatile_value(false);
+        }
+
+        if (!Config::Instance()->DontUseNTShared.has_value())
+        {
+            LOG_INFO("Luma detected, enabling DontUseNTShared");
+            State::Instance().detectedQuirks.push_back("Luma detected, enabling DontUseNTShared");
+            Config::Instance()->DontUseNTShared.set_volatile_value(true);
+        }
+
+        // If early creating of D3D12 device is not disabled and FSR Agility SDK Upgrade is enabled
+        if (!Config::Instance()->DontCreateD3D12DeviceForLuma.value_or_default() &&
+            Config::Instance()->FsrAgilitySDKUpgrade.value_or_default())
+        {
+            quirks |= GameQuirk::LoadD3D12Manually;
+
+            if (Config::Instance()->LoadReShade.value_or_default())
+                quirks |= GameQuirk::CreateD3D12DeviceForLuma;
+        }
+    }
+
+    // For Sekiro TSR
+    if (std::filesystem::exists(Util::ExePath().parent_path() / L"SekiroTSRLoader.addon"))
+    {
+        if (!Config::Instance()->DxgiSpoofing.has_value())
+        {
+            LOG_INFO("Sekiro TSR detected, disabling DxgiSpoofing");
+            State::Instance().detectedQuirks.push_back("Luma UE detected, disabling DxgiSpoofing");
+            Config::Instance()->DxgiSpoofing.set_volatile_value(false);
+        }
+
+        if (!Config::Instance()->DontUseNTShared.has_value())
+        {
+            LOG_INFO("Sekiro TSR detected, enabling DontUseNTShared");
+            State::Instance().detectedQuirks.push_back("Sekiro TSR detected, enabling DontUseNTShared");
+            Config::Instance()->DontUseNTShared.set_volatile_value(true);
+        }
+
+        // If early creating of D3D12 device is not disabled and FSR Agility SDK Upgrade is enabled
+        if (!Config::Instance()->DontCreateD3D12DeviceForLuma.value_or_default() &&
+            Config::Instance()->FsrAgilitySDKUpgrade.value_or_default())
+        {
+            quirks |= GameQuirk::LoadD3D12Manually;
+
+            if (Config::Instance()->LoadReShade.value_or_default())
+                quirks |= GameQuirk::CreateD3D12DeviceForLuma;
+        }
+    }
+
+    if (Config::Instance()->LoadReShade.value_or_default() && quirks & GameQuirk::CreateD3D12DeviceForLuma &&
         State::Instance().activeFgInput != FGInput::NoFG && State::Instance().activeFgInput != FGInput::Nukems)
     {
         Config::Instance()->DxgiFactoryWrapping.set_volatile_value(true);
-        State::Instance().detectedQuirks.push_back("DXGI Factory wrapping enabled due to ReShade + FG");
-        LOG_INFO("DXGI Factory wrapping enabled due to ReShade + FG");
+        State::Instance().detectedQuirks.push_back("Factory wrapping enabled due to delayed ReShade + FG");
+        LOG_INFO("Factory wrapping enabled due to delayed ReShade + FG");
     }
 
-    // if (Config::Instance()->LoadSpecialK.value_or_default() && State::Instance().activeFgInput != FGInput::NoFG &&
-    //     State::Instance().activeFgInput != FGInput::Nukems)
-    //{
-    //     Config::Instance()->LoadSpecialK.set_volatile_value(false);
-    //     State::Instance().detectedQuirks.push_back("FG Inputs are enabled, LoadSpecialK disabled");
-    //     LOG_INFO("FG Inputs are enabled, LoadSpecialK disabled");
-    // }
+    if (Config::Instance()->LoadSpecialK.value_or_default() && State::Instance().activeFgInput != FGInput::NoFG &&
+        State::Instance().activeFgInput != FGInput::Nukems)
+    {
+        Config::Instance()->LoadSpecialK.set_volatile_value(false);
+        State::Instance().detectedQuirks.push_back("FG Inputs are enabled, LoadSpecialK disabled");
+        LOG_INFO("FG Inputs are enabled, LoadSpecialK disabled");
+    }
 
     State::Instance().gameQuirks = quirks;
 
@@ -1491,8 +1513,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
             if (State::Instance().isRunningOnNvidia)
             {
-                spdlog::info(
-                    "Running on Nvidia, setting DLSS as default upscaler and disabling spoofing options set to auto");
+                spdlog::info("Running on Nvidia, setting DLSS as default upscaler and disabling spoofing options "
+                             "set to auto");
 
                 Config::Instance()->DLSSEnabled.set_volatile_value(true);
 

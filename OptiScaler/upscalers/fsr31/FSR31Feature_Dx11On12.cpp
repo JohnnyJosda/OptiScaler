@@ -214,6 +214,8 @@ bool FSR31FeatureDx11on12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_
 
     ffxReturnCode_t ffxresult = FFX_API_RETURN_ERROR;
 
+    uint8_t state = 0;
+
     do
     {
         if (!ProcessDx11Textures(InParameters))
@@ -243,6 +245,7 @@ bool FSR31FeatureDx11on12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_
                                            D3D12_RESOURCE_STATE_UNORDERED_ACCESS) &&
                 Bias->CanRender())
             {
+                state = 1;
                 Bias->SetBufferState(cmdList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
                 if (Bias->Dispatch(State::Instance().currentD3D12Device, cmdList, dx11Reactive.Dx12Resource,
@@ -261,6 +264,8 @@ bool FSR31FeatureDx11on12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_
                                                    TargetWidth(), TargetHeight(),
                                                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
             {
+                state = 1;
+
                 OutputScaler->SetBufferState(cmdList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                 params.output = ffxApiGetResourceDX12(OutputScaler->Buffer(), FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
             }
@@ -278,6 +283,7 @@ bool FSR31FeatureDx11on12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_
             RCAS->CreateBufferResource(State::Instance().currentD3D12Device, (ID3D12Resource*) params.output.resource,
                                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
         {
+            state = 1;
             RCAS->SetBufferState(cmdList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             params.output = ffxApiGetResourceDX12(RCAS->Buffer(), FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
         }
@@ -437,6 +443,7 @@ bool FSR31FeatureDx11on12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_
 
         LOG_DEBUG("Dispatch!!");
         ffxresult = FfxApiProxy::D3D12_Dispatch(&_context, &params.header);
+        state = 1;
 
         if (ffxresult != FFX_API_RETURN_OK)
         {
@@ -505,17 +512,25 @@ bool FSR31FeatureDx11on12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_
             }
         }
 
+        state = 2;
+
     } while (false);
 
-    cmdList->Close();
-    ID3D12CommandList* ppCommandLists[] = { cmdList };
-    Dx12CommandQueue->ExecuteCommandLists(1, ppCommandLists);
-    Dx12CommandQueue->Signal(dx12FenceTextureCopy, _fenceValue);
+    if (state > 0)
+    {
+        cmdList->Close();
+        ID3D12CommandList* ppCommandLists[] = { cmdList };
+        Dx12CommandQueue->ExecuteCommandLists(1, ppCommandLists);
+        Dx12CommandQueue->Signal(dx12FenceTextureCopy, _fenceValue);
+    }
 
     auto evalResult = false;
 
     do
     {
+        if (state != 2)
+            break;
+
         if (ffxresult != FFX_API_RETURN_OK)
             break;
 
@@ -585,10 +600,10 @@ bool FSR31FeatureDx11on12::InitFSR3(const NVSDK_NGX_Parameter* InParameters)
     // get number of versions for allocation
     FfxApiProxy::D3D12_Query(nullptr, &versionQuery.header);
 
-    State::Instance().fsr3xVersionIds.resize(versionCount);
-    State::Instance().fsr3xVersionNames.resize(versionCount);
-    versionQuery.versionIds = State::Instance().fsr3xVersionIds.data();
-    versionQuery.versionNames = State::Instance().fsr3xVersionNames.data();
+    State::Instance().ffxUpscalerVersionIds.resize(versionCount);
+    State::Instance().ffxUpscalerVersionNames.resize(versionCount);
+    versionQuery.versionIds = State::Instance().ffxUpscalerVersionIds.data();
+    versionQuery.versionNames = State::Instance().ffxUpscalerVersionNames.data();
     // fill version ids and names arrays.
     FfxApiProxy::D3D12_Query(nullptr, &versionQuery.header);
 
@@ -689,13 +704,13 @@ bool FSR31FeatureDx11on12::InitFSR3(const NVSDK_NGX_Parameter* InParameters)
     backendDesc.device = State::Instance().currentD3D12Device;
     _contextDesc.header.pNext = &backendDesc.header;
 
-    if (Config::Instance()->Fsr3xIndex.value_or_default() < 0 ||
-        Config::Instance()->Fsr3xIndex.value_or_default() >= State::Instance().fsr3xVersionIds.size())
-        Config::Instance()->Fsr3xIndex.set_volatile_value(0);
+    if (Config::Instance()->FfxUpscalerIndex.value_or_default() < 0 ||
+        Config::Instance()->FfxUpscalerIndex.value_or_default() >= State::Instance().ffxUpscalerVersionIds.size())
+        Config::Instance()->FfxUpscalerIndex.set_volatile_value(0);
 
     ffxOverrideVersion ov = { 0 };
     ov.header.type = FFX_API_DESC_TYPE_OVERRIDE_VERSION;
-    ov.versionId = State::Instance().fsr3xVersionIds[Config::Instance()->Fsr3xIndex.value_or_default()];
+    ov.versionId = State::Instance().ffxUpscalerVersionIds[Config::Instance()->FfxUpscalerIndex.value_or_default()];
     backendDesc.header.pNext = &ov.header;
 
     LOG_DEBUG("_createContext!");
@@ -710,7 +725,7 @@ bool FSR31FeatureDx11on12::InitFSR3(const NVSDK_NGX_Parameter* InParameters)
         return false;
     }
 
-    auto version = State::Instance().fsr3xVersionNames[Config::Instance()->Fsr3xIndex.value_or_default()];
+    auto version = State::Instance().ffxUpscalerVersionNames[Config::Instance()->FfxUpscalerIndex.value_or_default()];
     _name = "FSR";
     parse_version(version);
 

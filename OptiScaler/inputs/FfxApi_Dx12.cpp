@@ -279,7 +279,7 @@ ffxReturnCode_t ffxCreateContext_Dx12(ffxContext* context, ffxCreateContextDescH
     // Game is creating FSR-FG swapchain and calling present twice per frame
     // So when using OptiFG I am hijacking FSR-FG swapchain
     // It would crash the games which uses swapchain for FG
-    if (type == FFXStructType::SwapchainDX12 &&
+    if ((type == FFXStructType::SwapchainDX12 || type == FFXStructType::FG) &&
         (state.activeFgInput == FGInput::FSRFG ||
          (Config::Instance()->FGAlwaysCaptureFSRFGSwapchain.value_or_default() &&
           state.activeFgOutput != FGOutput::NoFG && state.activeFgOutput != FGOutput::Nukems &&
@@ -416,16 +416,18 @@ ffxReturnCode_t ffxDestroyContext_Dx12(ffxContext* context, const ffxAllocationC
         return result;
     }
 
-    bool upscalerContext = false;
+    bool upscalerContext =
+        _contexts.contains(*context) || _initParams.contains(*context) || _nvParams.contains(*context);
+
     if (_contexts.contains(*context))
-    {
         NVSDK_NGX_D3D12_ReleaseFeature(_contexts[*context]);
-        upscalerContext = true;
-    }
 
     _contexts.erase(*context);
     _nvParams.erase(*context);
     _initParams.erase(*context);
+
+    if (upscalerContext && !Config::Instance()->EnableHotSwapping.value_or_default())
+        return FFX_API_RETURN_OK;
 
     if (State::Instance().currentFG != nullptr)
         LOG_DEBUG("context: {:X}, SwapchainContext: {:X}, FGContext: {:X}", (size_t) *context,
@@ -441,7 +443,7 @@ ffxReturnCode_t ffxDestroyContext_Dx12(ffxContext* context, const ffxAllocationC
         return FFX_API_RETURN_OK;
     }
 
-    if (State::Instance().activeFgInput == FGInput::FSRFG)
+    if (State::Instance().activeFgInput == FGInput::FSRFG && !upscalerContext)
     {
         auto result = ffxDestroyContext_Dx12FG(context, memCb);
 
@@ -449,14 +451,9 @@ ffxReturnCode_t ffxDestroyContext_Dx12(ffxContext* context, const ffxAllocationC
             return result;
     }
 
-    if (Config::Instance()->EnableHotSwapping.value_or_default())
-    {
-        auto cdResult = FfxApiProxy::D3D12_DestroyContext(context, memCb);
-        LOG_INFO("result: {:X}", (UINT) cdResult);
-        return cdResult;
-    }
-
-    return FFX_API_RETURN_OK;
+    auto cdResult = FfxApiProxy::D3D12_DestroyContext(context, memCb);
+    LOG_INFO("result: {:X}", (UINT) cdResult);
+    return cdResult;
 }
 
 ffxReturnCode_t ffxConfigure_Dx12(ffxContext* context, ffxConfigureDescHeader* desc)
@@ -467,10 +464,12 @@ ffxReturnCode_t ffxConfigure_Dx12(ffxContext* context, ffxConfigureDescHeader* d
     LOG_DEBUG("type: {}", FfxGetGetDescTypeName(desc->type));
 
     auto type = FfxApiProxy::GetType(desc->type);
-    if (State::Instance().activeFgInput == FGInput::FSRFG &&
-        (type == FFXStructType::SwapchainDX12 || type == FFXStructType::FG))
+    if (type == FFXStructType::SwapchainDX12 || type == FFXStructType::FG)
     {
-        auto result = ffxConfigure_Dx12FG(context, desc);
+        ffxReturnCode_t result = PASSTHRU_RETURN_CODE;
+
+        if (State::Instance().activeFgInput == FGInput::FSRFG)
+            result = ffxConfigure_Dx12FG(context, desc);
 
         if (result == PASSTHRU_RETURN_CODE)
             return FfxApiProxy::D3D12_Configure(context, desc);
@@ -505,11 +504,13 @@ ffxReturnCode_t ffxQuery_Dx12(ffxContext* context, ffxQueryDescHeader* desc)
 
     LOG_DEBUG("type: {}", FfxGetGetDescTypeName(desc->type));
 
-    auto type = FfxApiProxy::GetType(desc);
-    if (State::Instance().activeFgInput == FGInput::FSRFG &&
-        (type == FFXStructType::SwapchainDX12 || type == FFXStructType::FG))
+    auto type = FfxApiProxy::GetIndirectType(desc);
+    if (type == FFXStructType::SwapchainDX12 || type == FFXStructType::FG)
     {
-        auto result = ffxQuery_Dx12FG(context, desc);
+        ffxReturnCode_t result = PASSTHRU_RETURN_CODE;
+
+        if (State::Instance().activeFgInput == FGInput::FSRFG)
+            result = ffxQuery_Dx12FG(context, desc);
 
         if (result == PASSTHRU_RETURN_CODE)
             return FfxApiProxy::D3D12_Query(context, desc);
@@ -552,18 +553,25 @@ ffxReturnCode_t ffxQuery_Dx12(ffxContext* context, ffxQueryDescHeader* desc)
         auto jitterPhaseDesc = (ffxQueryDescUpscaleGetJitterPhaseCount*) desc;
 
         if (jitterPhaseDesc && State::Instance().currentFeature)
+        {
             jitterPhaseDesc->displayWidth = State::Instance().currentFeature->TargetWidth();
+            jitterPhaseDesc->renderWidth = State::Instance().currentFeature->RenderWidth();
+        }
 
         if (!Config::Instance()->EnableHotSwapping.value_or_default())
         {
             float ratio = (float) jitterPhaseDesc->displayWidth / (float) jitterPhaseDesc->renderWidth;
-            *jitterPhaseDesc->pOutPhaseCount = static_cast<uint32_t>(ceil(ratio * ratio * 8.0f)); // ceil(8*n^2)
+            *jitterPhaseDesc->pOutPhaseCount = static_cast<int32_t>(ceil(ratio * ratio * 8.0f)); // ceil(8*n^2)
             LOG_DEBUG("Render resolution: {}, Display resolution: {}, Ratio: {}, Jitter phase count: {}",
                       jitterPhaseDesc->renderWidth, jitterPhaseDesc->displayWidth, ratio,
                       *jitterPhaseDesc->pOutPhaseCount);
 
             return FFX_API_RETURN_OK;
         }
+    }
+    else if (desc->type == FFX_API_QUERY_DESC_TYPE_UPSCALE_GETJITTEROFFSET)
+    {
+        return FfxApiProxy::D3D12_Query(context, desc);
     }
 
     if (context != nullptr && _contexts.contains(*context) && !Config::Instance()->EnableHotSwapping.value_or_default())
@@ -572,35 +580,41 @@ ffxReturnCode_t ffxQuery_Dx12(ffxContext* context, ffxQueryDescHeader* desc)
         return FFX_API_RETURN_OK;
     }
 
-    if (Config::Instance()->EnableHotSwapping.value_or_default())
+    // Need to redirect base queries to real FfxApi
+    if (Config::Instance()->EnableHotSwapping.value_or_default() ||
+        FfxApiProxy::GetType(desc->type) == FFXStructType::General)
+    {
         return FfxApiProxy::D3D12_Query(context, desc);
+    }
 
     return FFX_API_RETURN_OK;
 }
 
 ffxReturnCode_t ffxDispatch_Dx12(ffxContext* context, ffxDispatchDescHeader* desc)
 {
-    // Skip OptiScaler stuff
-    if (Config::Instance()->EnableHotSwapping.value_or_default() &&
-        !Config::Instance()->UseFfxInputs.value_or_default())
-        return FfxApiProxy::D3D12_Dispatch(context, desc);
-
     if (desc == nullptr || context == nullptr)
         return FFX_API_RETURN_ERROR_PARAMETER;
 
     LOG_DEBUG("context: {:X}, type: {}", (size_t) *context, FfxGetGetDescTypeName(desc->type));
 
     auto type = FfxApiProxy::GetType(desc->type);
-    if (State::Instance().activeFgInput == FGInput::FSRFG &&
-        (type == FFXStructType::SwapchainDX12 || type == FFXStructType::FG))
+    if (type == FFXStructType::SwapchainDX12 || type == FFXStructType::FG)
     {
-        auto result = ffxDispatch_Dx12FG(context, desc);
+        ffxReturnCode_t result = PASSTHRU_RETURN_CODE;
+
+        if (State::Instance().activeFgInput == FGInput::FSRFG)
+            result = ffxDispatch_Dx12FG(context, desc);
 
         if (result == PASSTHRU_RETURN_CODE)
             return FfxApiProxy::D3D12_Dispatch(context, desc);
 
         return result;
     }
+
+    // Skip OptiScaler stuff
+    if (Config::Instance()->EnableHotSwapping.value_or_default() &&
+        !Config::Instance()->UseFfxInputs.value_or_default())
+        return FfxApiProxy::D3D12_Dispatch(context, desc);
 
     if (context == nullptr || !_initParams.contains(*context))
     {

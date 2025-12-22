@@ -594,8 +594,7 @@ void FSRFG_Dx12::DestroyFGContext()
         _fgContext = nullptr;
     }
 
-    if (State::Instance().isShuttingDown)
-        ReleaseObjects();
+    ReleaseObjects();
 }
 
 bool FSRFG_Dx12::Shutdown()
@@ -1180,6 +1179,8 @@ bool FSRFG_Dx12::SetResource(Dx12Resource* inputResource)
     else if (type == FG_ResourceType::HudlessColor)
     {
         auto format = State::Instance().currentSwapchainDesc.BufferDesc.Format;
+        _lastHudlessFormat =
+            (FfxApiSurfaceFormat) ffxApiGetSurfaceFormatDX12(fResource->GetResource()->GetDesc().Format);
 
         auto hudlessFormatGroup = GetFormatPrecisionGroup(
             (FfxApiSurfaceFormat) ffxApiGetSurfaceFormatDX12(fResource->GetResource()->GetDesc().Format));
@@ -1193,13 +1194,12 @@ bool FSRFG_Dx12::SetResource(Dx12Resource* inputResource)
                 LOG_WARN("Skipping hudless resource due to format mismatch! hudless: {}, swapchain: {}",
                          hudlessFormatGroup, scFormatGroup);
 
+                _lastHudlessFormat = FFX_API_SURFACE_FORMAT_UNKNOWN;
                 _frameResources[fIndex][type] = {};
                 return false;
             }
             else
             {
-                _lastHudlessFormat =
-                    (FfxApiSurfaceFormat) ffxApiGetSurfaceFormatDX12(fResource->GetResource()->GetDesc().Format);
                 fResource->validity = FG_ResourceValidity::UntilPresent;
             }
         }

@@ -9,32 +9,44 @@ DXGI_FORMAT Shader_Dx12::TranslateTypelessFormats(DXGI_FORMAT format)
     {
     case DXGI_FORMAT_R32G32B32A32_TYPELESS:
         return DXGI_FORMAT_R32G32B32A32_FLOAT;
+
     case DXGI_FORMAT_R32G32B32_TYPELESS:
         return DXGI_FORMAT_R32G32B32_FLOAT;
+
     case DXGI_FORMAT_R16G16B16A16_TYPELESS:
         return DXGI_FORMAT_R16G16B16A16_FLOAT;
+
     case DXGI_FORMAT_R10G10B10A2_TYPELESS:
         return DXGI_FORMAT_R10G10B10A2_UINT;
+
     case DXGI_FORMAT_R8G8B8A8_TYPELESS:
         return DXGI_FORMAT_R8G8B8A8_UNORM;
+
     case DXGI_FORMAT_B8G8R8A8_TYPELESS:
         return DXGI_FORMAT_B8G8R8A8_UNORM;
+
     case DXGI_FORMAT_R16G16_TYPELESS:
         return DXGI_FORMAT_R16G16_FLOAT;
+
     case DXGI_FORMAT_R32G32_TYPELESS:
         return DXGI_FORMAT_R32G32_FLOAT;
 
     // Some shaders didn't have those conversions and I'm not 100% sure if it's fine to do for them
     case DXGI_FORMAT_R24G8_TYPELESS:
         return DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+
     case DXGI_FORMAT_R32G8X24_TYPELESS:
         return DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+
     case DXGI_FORMAT_R32_TYPELESS:
         return DXGI_FORMAT_R32_FLOAT;
+
     case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS:
         return DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+
     case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
         return DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+
     default:
         return format;
     }
@@ -75,6 +87,9 @@ bool Shader_Dx12::CreateBufferResource(ID3D12Device* InDevice, ID3D12Resource* I
         inDesc.Height = InHeight;
     }
 
+    if (InFormat != DXGI_FORMAT_UNKNOWN)
+        inDesc.Format = InFormat;
+
     if (*OutResource != nullptr)
     {
         auto bufDesc = (*OutResource)->GetDesc();
@@ -102,8 +117,6 @@ bool Shader_Dx12::CreateBufferResource(ID3D12Device* InDevice, ID3D12Resource* I
     }
 
     inDesc.Flags |= ResourceFlags;
-    if (InFormat != DXGI_FORMAT_UNKNOWN)
-        inDesc.Format = InFormat;
 
     hr = InDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &inDesc, InState, nullptr,
                                            IID_PPV_ARGS(OutResource));

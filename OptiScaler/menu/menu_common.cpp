@@ -2255,13 +2255,36 @@ bool MenuCommon::RenderMenu()
                         ImGui::SetWindowFontScale(config->MenuScale.value_or_default());
 
                     ImGui::Spacing();
-                    ImGui::Text("nvngx.dll: %s",
-                                state.nvngxExists || state.isRunningOnNvidia ? "Exists" : "Doesn't Exist");
-                    ImGui::Text("nvngx replacement: %s",
-                                state.nvngxReplacement.has_value() ? "Exists" : "Doesn't Exist");
-                    ImGui::Text("libxess.dll: %s",
+
+                    if (!state.isRunningOnNvidia)
+                    {
+                        ImGui::Text("nvngx.dll: %s", state.nvngxExists ? "Exists" : "Doesn't Exist");
+                    }
+
+                    if (state.isRunningOnNvidia)
+                    {
+                        ImGui::Text("nvngx_dlss : %s", state.NVNGX_DLSS_Path.has_value() ? "Exists" : "Doesn't Exist");
+                        ImGui::SameLine(0.0f, 16.0f);
+                        ImGui::Text("nvngx_dlssd : %s",
+                                    state.NVNGX_DLSSD_Path.has_value() ? "Exists" : "Doesn't Exist");
+                    }
+                    else
+                    {
+                        ImGui::SameLine(0.0f, 16.0f);
+                        ImGui::Text("nvngx replacement: %s",
+                                    state.nvngxReplacement.has_value() ? "Exists" : "Doesn't Exist");
+                    }
+
+                    ImGui::Text("libxess: %s",
                                 (state.libxessExists || XeSSProxy::Module() != nullptr) ? "Exists" : "Doesn't Exist");
-                    ImGui::Text("fsr: %s", state.fsrHooks ? "Exists" : "Doesn't Exist");
+
+                    ImGui::Text("FSR Hooks: %s", state.fsrHooks ? "Exists" : "Doesn't Exist");
+                    ImGui::SameLine(0.0f, 16.0f);
+                    ImGui::Text("FSR 3.1: %s", FfxApiProxy::Dx12Module() != nullptr ? "Exists" : "Doesn't Exist");
+                    ImGui::SameLine(0.0f, 16.0f);
+                    ImGui::Text("FSR 3.1 SR: %s", FfxApiProxy::Dx12Module_SR() != nullptr ? "Exists" : "Doesn't Exist");
+                    ImGui::SameLine(0.0f, 16.0f);
+                    ImGui::Text("FSR 3.1 FG: %s", FfxApiProxy::Dx12Module_FG() != nullptr ? "Exists" : "Doesn't Exist");
 
                     ImGui::Spacing();
                 }
@@ -2410,6 +2433,12 @@ bool MenuCommon::RenderMenu()
                             config->FsrUseMaskForTransparency = useAsTransparency;
 
                         ImGui::EndDisabled();
+                    }
+
+                    if (state.isRunningOnNvidia && !state.NVNGX_DLSS_Path.has_value())
+                    {
+                        ImGui::Spacing();
+                        ImGui::TextColored(ImVec4(1.f, 0.8f, 0.f, 1.f), "nvngx_dlss.dll not found, DLSS disabled!");
                     }
                 }
 
@@ -3168,7 +3197,7 @@ bool MenuCommon::RenderMenu()
 
                             ImGui::EndDisabled();
 
-                            ImGui::SameLine();
+                            ImGui::SameLine(0.0f, 16.0f);
 
                             bool disableHudless = config->FGDisableHudless.value_or_default();
                             ImGui::BeginDisabled(!isUsingHudlessAny && !disableHudless);
@@ -3203,6 +3232,28 @@ bool MenuCommon::RenderMenu()
                             }
 
                             ImGui::EndDisabled();
+
+                            bool depthValidNow = config->FGDepthValidNow.value_or_default();
+                            if (ImGui::Checkbox("Set Depth as ValidNow", &depthValidNow))
+                                config->FGDepthValidNow = depthValidNow;
+
+                            ShowHelpMarker("Will use more VRAM but Uniscaler needs this\n"
+                                           "Maybe some other games might need too");
+
+                            ImGui::SameLine(0.0f, 16.0f);
+
+                            bool velocityValidNow = config->FGVelocityValidNow.value_or_default();
+                            if (ImGui::Checkbox("Set Velocity as ValidNow", &velocityValidNow))
+                                config->FGVelocityValidNow = velocityValidNow;
+
+                            ShowHelpMarker("Will use more VRAM but Uniscaler needs this\n"
+                                           "Maybe some other games might need too");
+
+                            bool hudlessValidNow = config->FGHudlessValidNow.value_or_default();
+                            if (ImGui::Checkbox("Set Hudless as ValidNow", &hudlessValidNow))
+                                config->FGHudlessValidNow = hudlessValidNow;
+
+                            ShowHelpMarker("Will use more VRAM but some games might need this");
 
                             if (bool skipReset = config->FGSkipReset.value_or_default();
                                 ImGui::Checkbox("Skip Reset", &skipReset))
@@ -4044,13 +4095,6 @@ bool MenuCommon::RenderMenu()
                         config->FSRFGSkipDispatchForHudless = skipDispatch;
 
                     ShowHelpMarker("Do not use Hudless set at ffxDispatch");
-
-                    bool dmvValidNow = config->FSRFGDepthAndVelocityValidNow.value_or_default();
-                    if (ImGui::Checkbox("Set Depth and Velocity as ValidNow", &dmvValidNow))
-                        config->FSRFGDepthAndVelocityValidNow = dmvValidNow;
-
-                    ShowHelpMarker("Will use more VRAM but Uniscaler needs this\n"
-                                   "Maybe some other games might need too");
                 }
 
                 // Streamline FG Inputs

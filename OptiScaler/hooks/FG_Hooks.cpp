@@ -18,7 +18,7 @@
 
 #include <d3d12.h>
 
-bool CheckForFGStatus()
+static bool CheckForFGStatus()
 {
     // Need to check overlay menu parameter, goes to places it shouldn't go
     // if (!Config::Instance()->OverlayMenu.value_or_default())
@@ -91,33 +91,34 @@ HRESULT FGHooks::CreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, DXGI
 
     // Create FG swapchain
     auto fg = State::Instance().currentFG;
+    bool scResult = false;
 
-    State::Instance().skipDxgiLoadChecks = true;
-
-    if (Config::Instance()->FGDontUseSwapchainBuffers.value_or_default())
-        State::Instance().skipHeapCapture = true;
-
-    if (State::Instance().activeFgOutput == FGOutput::XeFG && !pDesc->Windowed)
-        LOG_WARN("Using exclusive fullscreen with XeFG!!!");
-
-    // These effects are not supported in DX12
-    if (pDesc->SwapEffect == DXGI_SWAP_EFFECT_SEQUENTIAL)
     {
-        LOG_WARN("DXGI_SWAP_EFFECT_SEQUENTIAL is not supported in DX12, changing to FLIP_SEQUENTIAL");
-        pDesc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        ScopedSkipDxgiLoadChecks skipDxgiLoadChecks {};
+
+        if (Config::Instance()->FGDontUseSwapchainBuffers.value_or_default())
+            State::Instance().skipHeapCapture = true;
+
+        if (State::Instance().activeFgOutput == FGOutput::XeFG && !pDesc->Windowed)
+            LOG_WARN("Using exclusive fullscreen with XeFG!!!");
+
+        // These effects are not supported in DX12
+        if (pDesc->SwapEffect == DXGI_SWAP_EFFECT_SEQUENTIAL)
+        {
+            LOG_WARN("DXGI_SWAP_EFFECT_SEQUENTIAL is not supported in DX12, changing to FLIP_SEQUENTIAL");
+            pDesc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        }
+        else if (pDesc->SwapEffect == DXGI_SWAP_EFFECT_DISCARD)
+        {
+            LOG_WARN("DXGI_SWAP_EFFECT_DISCARD is not supported in DX12, changing to FLIP_DISCARD");
+            pDesc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        }
+
+        scResult = fg->CreateSwapchain(pFactory, cq, pDesc, ppSwapChain);
+
+        if (Config::Instance()->FGDontUseSwapchainBuffers.value_or_default())
+            State::Instance().skipHeapCapture = false;
     }
-    else if (pDesc->SwapEffect == DXGI_SWAP_EFFECT_DISCARD)
-    {
-        LOG_WARN("DXGI_SWAP_EFFECT_DISCARD is not supported in DX12, changing to FLIP_DISCARD");
-        pDesc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    }
-
-    auto scResult = fg->CreateSwapchain(pFactory, cq, pDesc, ppSwapChain);
-
-    if (Config::Instance()->FGDontUseSwapchainBuffers.value_or_default())
-        State::Instance().skipHeapCapture = false;
-
-    State::Instance().skipDxgiLoadChecks = false;
 
     if (scResult)
     {
@@ -172,33 +173,34 @@ HRESULT FGHooks::CreateSwapChainForHwnd(IDXGIFactory* pFactory, IUnknown* pDevic
 
     // Create FG swapchain
     auto fg = State::Instance().currentFG;
-
-    State::Instance().skipDxgiLoadChecks = true;
-
-    if (Config::Instance()->FGDontUseSwapchainBuffers.value_or_default())
-        State::Instance().skipHeapCapture = true;
-
-    if (State::Instance().activeFgOutput == FGOutput::XeFG && pFullscreenDesc != nullptr && !pFullscreenDesc->Windowed)
-        LOG_WARN("Using exclusive fullscreen with XeFG!!!");
-
-    // These effects are not supported in DX12
-    if (pDesc->SwapEffect == DXGI_SWAP_EFFECT_SEQUENTIAL)
+    bool scResult = false;
     {
-        LOG_WARN("DXGI_SWAP_EFFECT_SEQUENTIAL is not supported in DX12, changing to FLIP_SEQUENTIAL");
-        pDesc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        ScopedSkipDxgiLoadChecks skipDxgiLoadChecks {};
+
+        if (Config::Instance()->FGDontUseSwapchainBuffers.value_or_default())
+            State::Instance().skipHeapCapture = true;
+
+        if (State::Instance().activeFgOutput == FGOutput::XeFG && pFullscreenDesc != nullptr &&
+            !pFullscreenDesc->Windowed)
+            LOG_WARN("Using exclusive fullscreen with XeFG!!!");
+
+        // These effects are not supported in DX12
+        if (pDesc->SwapEffect == DXGI_SWAP_EFFECT_SEQUENTIAL)
+        {
+            LOG_WARN("DXGI_SWAP_EFFECT_SEQUENTIAL is not supported in DX12, changing to FLIP_SEQUENTIAL");
+            pDesc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        }
+        else if (pDesc->SwapEffect == DXGI_SWAP_EFFECT_DISCARD)
+        {
+            LOG_WARN("DXGI_SWAP_EFFECT_DISCARD is not supported in DX12, changing to FLIP_DISCARD");
+            pDesc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        }
+
+        scResult = fg->CreateSwapchain1(pFactory, cq, hWnd, pDesc, pFullscreenDesc, ppSwapChain);
+
+        if (Config::Instance()->FGDontUseSwapchainBuffers.value_or_default())
+            State::Instance().skipHeapCapture = false;
     }
-    else if (pDesc->SwapEffect == DXGI_SWAP_EFFECT_DISCARD)
-    {
-        LOG_WARN("DXGI_SWAP_EFFECT_DISCARD is not supported in DX12, changing to FLIP_DISCARD");
-        pDesc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    }
-
-    auto scResult = fg->CreateSwapchain1(pFactory, cq, hWnd, pDesc, pFullscreenDesc, ppSwapChain);
-
-    if (Config::Instance()->FGDontUseSwapchainBuffers.value_or_default())
-        State::Instance().skipHeapCapture = false;
-
-    State::Instance().skipDxgiLoadChecks = false;
 
     if (scResult)
     {
@@ -516,11 +518,13 @@ HRESULT FGHooks::hkResizeBuffers(IDXGISwapChain* This, UINT BufferCount, UINT Wi
     }
 
     _skipResize1 = true;
-    State::Instance().skipSpoofing = true;
 
-    auto result = o_FGSCResizeBuffers(This, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+    HRESULT result;
+    {
+        ScopedSkipSpoofing skipSpoofing {};
+        result = o_FGSCResizeBuffers(This, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+    }
 
-    State::Instance().skipSpoofing = false;
     _skipResize1 = false;
 
     LOG_DEBUG("Result: {:X}, Caller: {}", (UINT) result, Util::WhoIsTheCaller(_ReturnAddress()));
@@ -709,14 +713,16 @@ HRESULT FGHooks::hkResizeBuffers1(IDXGISwapChain* This, UINT BufferCount, UINT W
         fg->Deactivate();
     }
 
-    State::Instance().skipSpoofing = true;
-    _skipResize = true;
+    HRESULT result;
+    {
+        ScopedSkipSpoofing skipSpoofing {};
+        _skipResize = true;
 
-    auto result = o_FGSCResizeBuffers1(This, BufferCount, Width, Height, Format, SwapChainFlags, pCreationNodeMask,
-                                       ppPresentQueue);
+        result = o_FGSCResizeBuffers1(This, BufferCount, Width, Height, Format, SwapChainFlags, pCreationNodeMask,
+                                      ppPresentQueue);
 
-    _skipResize = false;
-    State::Instance().skipSpoofing = false;
+        _skipResize = false;
+    }
 
     LOG_DEBUG("Result: {:X}, Caller: {}", (UINT) result, Util::WhoIsTheCaller(_ReturnAddress()));
 

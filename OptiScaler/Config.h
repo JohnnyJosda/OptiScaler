@@ -402,6 +402,7 @@ class Config
     CustomOptional<bool> FGDepthValidNow { false };
     CustomOptional<bool> FGVelocityValidNow { false };
     CustomOptional<bool> FGHudlessValidNow { false };
+    CustomOptional<bool> FGOnlyAcceptFirstHudless { false };
 
     // OptiFG
     CustomOptional<bool> FGEnabled { false };
@@ -435,7 +436,7 @@ class Config
     CustomOptional<bool> FGHudfixDisableSGR { true };
 
     // OptiFG - Resource Tracking
-    CustomOptional<bool> FGAlwaysTrackHeaps { true };
+    CustomOptional<bool> FGAlwaysTrackHeaps { false };
     CustomOptional<bool> FGResourceBlocking { false };
 
     // OptiFG - DLSS-D Depth scale
